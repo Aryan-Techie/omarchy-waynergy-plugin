@@ -2,6 +2,19 @@
 
 All notable user-facing changes to this plugin. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v1.2.1 — Drop the header refresh button, fix a layout overflow
+
+### Changed
+
+- Removed the header refresh icon button — press **R** anywhere in the panel instead
+  (same idea as the existing **S** toggle shortcut).
+
+### Fixed
+
+- The keyboard-shortcut button row (`Ctrl+Super+Y` / `Record custom…` / `Remove`) could
+  overflow past the panel's right edge instead of wrapping. Both button rows in that
+  section now wrap to a new line when they don't fit.
+
 ## v1.2.0 — Wi-Fi-panel-style restyle, live uptime, Known Hosts
 
 ### Added

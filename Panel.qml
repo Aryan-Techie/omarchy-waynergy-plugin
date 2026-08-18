@@ -330,7 +330,7 @@ Panel {
   //      Remove for nothing at all once recording takes over the whole
   //      panel via PanelKeyCatcher.blocked).
   function currentFocusOrder() {
-    var order = ["power", "refresh", "ip", "save"]
+    var order = ["power", "ip", "save"]
     for (var i = 0; i < root.recentIps.length; i++) order.push("knownIp" + i)
     order.push("label", "keybindDefault", "keybindRecord")
     if (root.keybindCombo !== "") order.push("keybindRemove")
@@ -348,7 +348,6 @@ Panel {
   function activateCursor() {
     root.cursorActive = true
     if (root.focusSection === "power") root.toggleWaynergy()
-    else if (root.focusSection === "refresh") root.refreshStatus()
     else if (root.focusSection === "ip") Qt.callLater(function() { ipField.forceActiveFocus(); ipField.selectAll() })
     else if (root.focusSection === "save") { if (saveButton.enabled) root.saveIp() }
     else if (root.focusSection === "label") root.setShowLabel(!root.showLabel)
@@ -487,6 +486,7 @@ Panel {
       onActivateRequested: root.activateCursor()
       onTextKey: function(t) {
         if (t === "s" || t === "S") root.toggleWaynergy()
+        else if (t === "r" || t === "R") root.refreshStatus()
       }
 
       Flickable {
@@ -523,31 +523,18 @@ Panel {
             }
 
             trailingControl: Component {
-              Row {
-                spacing: Style.space(6)
+              ToggleSwitch {
+                id: powerSwitch
+                checked: root.running
+                interactive: root.installed
+                hasCursor: root.cursorActive && root.focusSection === "power"
+                foreground: hero.foreground
+                onToggled: root.toggleWaynergy()
 
-                PanelActionButton {
-                  id: refreshButton
-                  iconText: "↻"
-                  tooltipText: "Refresh status"
-                  foreground: hero.foreground
-                  hasCursor: root.cursorActive && root.focusSection === "refresh"
-                  onClicked: root.refreshStatus()
-                }
-
-                ToggleSwitch {
-                  id: powerSwitch
-                  checked: root.running
-                  interactive: root.installed
-                  hasCursor: root.cursorActive && root.focusSection === "power"
-                  foreground: hero.foreground
-                  onToggled: root.toggleWaynergy()
-
-                  PanelToolTip {
-                    visible: powerSwitch.containsMouse
-                    text: root.installed ? (root.running ? "Stop waynergy" : "Start waynergy") : "Waynergy isn't installed"
-                    fontFamily: hero.fontFamily
-                  }
+                PanelToolTip {
+                  visible: powerSwitch.containsMouse
+                  text: root.installed ? (root.running ? "Stop waynergy" : "Start waynergy") : "Waynergy isn't installed"
+                  fontFamily: hero.fontFamily
                 }
               }
             }
@@ -736,8 +723,9 @@ Panel {
               font.pixelSize: Style.font.bodySmall
             }
 
-            Row {
+            Flow {
               visible: !root.recordingKeybind
+              width: parent.width
               spacing: Style.spacing.sm
 
               Button {
@@ -808,7 +796,8 @@ Panel {
                 font.pixelSize: Style.font.caption
               }
 
-              Row {
+              Flow {
+                width: parent.width
                 spacing: Style.spacing.sm
 
                 Button {

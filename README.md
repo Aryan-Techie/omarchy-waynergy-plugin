@@ -58,7 +58,7 @@ this plugin has nothing to connect to — it's the client-side control only.
 - **Right click** — toggle: starts `waynergy -c <ip> -p 24800 -E` if it's
   not running, kills it (`pkill -x waynergy`) if it is. No panel opens.
 - **Left click** — opens a panel with:
-  - A power toggle and a refresh button in the header, next to the status line.
+  - A power toggle in the header, next to the status line.
   - A status pill that actually tells you what's wrong instead of staying
     silent: "Waynergy isn't installed or not on `PATH`." if it can't find
     the binary, or "Waynergy exited right after starting — check the IP
@@ -144,11 +144,13 @@ a config error, the backup is restored automatically and nothing changes.
 Once the panel is open:
 
 - **Up / Down** (or **j** / **k**) — move the highlight between every
-  control: the power toggle, the refresh button, the IP field, the Save
-  button, any Known Hosts rows, the label switch, and the keyboard-shortcut
-  buttons.
+  control: the power toggle, the IP field, the Save button, any Known
+  Hosts rows, the label switch, and the keyboard-shortcut buttons.
 - **Space** or **Enter** — activate whatever's highlighted: flips a toggle,
   focuses the IP field for typing, or clicks a button.
+- **R** — refresh the running-state check immediately, from anywhere in
+  the panel (doesn't need the highlight to be on anything in particular).
+- **S** — toggle waynergy on/off, same as **R** works from anywhere.
 - **Escape** — while actually typing in the IP field, the first Escape just
   exits typing and returns to the highlight (doesn't close the panel); a
   second Escape (or one from anywhere else) closes the panel.
