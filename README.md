@@ -25,6 +25,8 @@ want to touch a terminal.
 - [Requirements](#requirements)
 - [Install](#install)
 - [Usage](#usage)
+  - [Keyboard shortcut](#keyboard-shortcut)
+  - [Keyboard navigation inside the panel](#keyboard-navigation-inside-the-panel)
 - [How it works](#how-it-works)
 - [State files](#state-files)
 - [Uninstalling](#uninstalling)
@@ -66,7 +68,12 @@ this plugin has nothing to connect to — it's the client-side control only.
     next to it.
   - A switch to show/hide the "Waynergy" label in the bar (leaves just the
     dot).
+  - A keyboard shortcut recorder — set once, works from anywhere.
 - **Middle click** — force a status refresh.
+- **Optional global keyboard shortcut** (`Ctrl+Super+Y` by default, or record
+  your own) to open the panel without touching the mouse.
+- **Fully keyboard-navigable panel** — Up/Down between every control, Space
+  or Enter to activate whatever's highlighted, Escape to back out.
 - No config file editing required — settings live in a small local JSON
   file, edited entirely from the panel.
 
@@ -110,8 +117,35 @@ run `omarchy-shell shell rescanPlugins` if it doesn't pick up right away).
 | Action | Effect |
 |---|---|
 | Right click | Start waynergy if stopped, kill it if running |
-| Left click | Open the panel (status + power toggle + connection details + IP field + label switch) |
+| Left click | Open the panel (status + power toggle + connection details + IP field + label switch + keyboard shortcut) |
 | Middle click | Refresh the running-state check immediately |
+
+### Keyboard shortcut
+
+No shortcut is set by default — open the panel once (left-click the bar
+pill) and use the **Keyboard shortcut** section at the bottom:
+
+- **Ctrl+Super+Y** — applies that combo immediately.
+- **Record custom…** — press it into the box (needs at least one modifier:
+  Super/Ctrl/Alt/Shift), then **Apply**. **Esc** cancels the recording.
+- **Remove** — clears whatever shortcut is currently set.
+
+Applying writes a line to `~/.config/hypr/bindings.lua` (backed up first as
+`bindings.lua.bak.<timestamp>`) and reloads Hyprland. If the reload reports
+a config error, the backup is restored automatically and nothing changes.
+
+### Keyboard navigation inside the panel
+
+Once the panel is open:
+
+- **Up / Down** (or **j** / **k**) — move the highlight between every
+  control: the power toggle, the IP field, the Save button, the label
+  switch, and the keyboard-shortcut buttons.
+- **Space** or **Enter** — activate whatever's highlighted: flips a toggle,
+  focuses the IP field for typing, or clicks a button.
+- **Escape** — while actually typing in the IP field, the first Escape just
+  exits typing and returns to the highlight (doesn't close the panel); a
+  second Escape (or one from anywhere else) closes the panel.
 
 ## How it works
 
@@ -123,21 +157,26 @@ run `omarchy-shell shell rescanPlugins` if it doesn't pick up right away).
   every start/stop.
 - **Installed check:** `which waynergy`, same pattern the built-in
   Tailscale plugin uses, checked on open and on every status poll.
+- **Keyboard shortcut:** a line appended to `~/.config/hypr/bindings.lua`
+  calling `omarchy-shell shell toggle io.github.aryan-techie.waynergy`,
+  applied via a backup-first, auto-rollback-on-error script (same mechanism
+  the todoist plugin uses for its own shortcut).
 - Port is fixed at `24800` and the `-E` flag is always passed, matching
   the command this plugin was built around. Only the IP is configurable.
 
 ## State files
 
-The host IP and label-visibility setting are stored at:
+The host IP, label-visibility setting, and keyboard shortcut are stored at:
 
 ```
 ~/.local/state/omarchy/io.github.aryan-techie.waynergy/settings.json
 ```
 
-It's `{ "ip": "...", "showLabel": true }` — nothing else is written
-anywhere on disk, and nothing is sent over the network by this plugin
-itself (the IP is only ever handed to `waynergy` as a `-c` argument,
-never shell-interpolated).
+It's `{ "ip": "...", "showLabel": true, "keybind": "..." }` — nothing else
+is written anywhere on disk except the one `~/.config/hypr/bindings.lua`
+line described above, and nothing is sent over the network by this plugin
+itself (the IP is only ever handed to `waynergy` as a `-c` argument, never
+shell-interpolated).
 
 ## Uninstalling
 

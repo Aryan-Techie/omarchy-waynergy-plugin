@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls
 import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
@@ -7,12 +8,14 @@ import qs.Ui
 
 // Owns waynergy's run state (polled via pgrep), whether the waynergy binary
 // is even on PATH (checked via `which`, same pattern the built-in Tailscale
-// plugin uses), and the persisted host IP / label-visibility settings. The
-// bar widget's right click calls toggleWaynergy() directly — no panel needed
-// for that. Left click opens this panel: status, a power toggle, connection
-// details, the IP field, and a switch to hide the "Waynergy" text next to
-// the bar dot. Visual idiom (hero + status pill + detail grid + inline
-// confirm button) matches the built-in Wi-Fi panel.
+// plugin uses), the persisted host IP / label-visibility / keybind settings,
+// and keyboard-cursor navigation between the panel's controls. The bar
+// widget's right click calls toggleWaynergy() directly — no panel needed for
+// that. Left click (or the global shortcut below) opens this panel: status,
+// a power toggle, connection details, the IP field, a label-visibility
+// switch, and a keyboard-shortcut recorder. Visual idiom (hero + status pill
+// + detail grid + inline confirm button) matches the built-in Wi-Fi panel;
+// the keyboard-shortcut recorder matches the one in the todoist plugin.
 Panel {
   id: root
   moduleName: "io.github.aryan-techie.waynergy"
@@ -24,6 +27,7 @@ Panel {
   readonly property var barIdentity: hostWidget || root
 
   readonly property string homeDir: Quickshell.env("HOME")
+  readonly property string pluginDir: homeDir + "/.config/omarchy/plugins/io.github.aryan-techie.waynergy"
   readonly property string stateDir: homeDir + "/.local/state/omarchy/io.github.aryan-techie.waynergy"
   readonly property string settingsPath: stateDir + "/settings.json"
 
@@ -45,6 +49,18 @@ Panel {
   property string lastError: ""
   property bool startPending: false
 
+  // ---- Keyboard shortcut (mirrors the todoist plugin's recorder exactly).
+  property string keybindCombo: ""
+  property bool recordingKeybind: false
+  property string pendingKeybindCombo: ""
+  property string keybindRecordError: ""
+  property string keybindApplyStatus: ""
+  property string keybindApplyError: ""
+
+  // ---- Keyboard cursor navigation between the panel's own controls.
+  property bool cursorActive: false
+  property string focusSection: "power"
+
   readonly property color contentForeground: bar ? bar.foreground : Color.foreground
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color dim: Qt.darker(contentForeground, 1.55)
@@ -64,10 +80,9 @@ Panel {
   onOpenedChanged: if (root.opened) {
     root.ipDraft = root.ip
     root.ipError = ""
+    root.cursorActive = false
+    root.focusSection = "power"
     root.refreshStatus()
-    Qt.callLater(function() {
-      if (root.opened) ipField.forceActiveFocus()
-    })
   }
 
   // ---- Process control. Start is fire-and-forget via execDetached (not
@@ -150,13 +165,135 @@ Panel {
     try { parsed = JSON.parse(text || "{}") } catch (e) { parsed = {} }
     if (typeof parsed.ip === "string" && isValidIp(parsed.ip)) root.ip = String(parsed.ip).trim()
     if (typeof parsed.showLabel === "boolean") root.showLabel = parsed.showLabel
+    if (typeof parsed.keybind === "string") root.keybindCombo = parsed.keybind
     root.ipDraft = root.ip
     root.settingsLoaded = true
     refreshStatus()
   }
 
   function persistSettings() {
-    settingsFile.setText(JSON.stringify({ ip: root.ip, showLabel: root.showLabel }, null, 2) + "\n")
+    settingsFile.setText(JSON.stringify({ ip: root.ip, showLabel: root.showLabel, keybind: root.keybindCombo }, null, 2) + "\n")
+  }
+
+  // ---- Keyboard shortcut recording. Mirrors a stripped-down Hyprland key
+  //      combo into "MOD + MOD + KEY" form; set-keybind.sh does the actual
+  //      ~/.config/hypr/bindings.lua edit (backup + reload + auto-rollback).
+  function isBareModifier(key) {
+    return key === Qt.Key_Super_L || key === Qt.Key_Super_R || key === Qt.Key_Meta
+      || key === Qt.Key_Control || key === Qt.Key_Shift || key === Qt.Key_Alt || key === Qt.Key_AltGr
+  }
+
+  function hyprKeyName(key) {
+    if (key >= Qt.Key_A && key <= Qt.Key_Z) return String.fromCharCode(key)
+    if (key >= Qt.Key_0 && key <= Qt.Key_9) return String.fromCharCode(key)
+    if (key >= Qt.Key_F1 && key <= Qt.Key_F12) return "F" + (key - Qt.Key_F1 + 1)
+    var names = {}
+    names[Qt.Key_Space] = "SPACE"
+    names[Qt.Key_Return] = "RETURN"
+    names[Qt.Key_Enter] = "RETURN"
+    names[Qt.Key_Tab] = "TAB"
+    names[Qt.Key_Backspace] = "BACKSPACE"
+    names[Qt.Key_Comma] = "comma"
+    names[Qt.Key_Period] = "period"
+    names[Qt.Key_Minus] = "minus"
+    names[Qt.Key_Equal] = "equal"
+    names[Qt.Key_Slash] = "slash"
+    return names[key] || ""
+  }
+
+  function startRecordingKeybind() {
+    root.recordingKeybind = true
+    root.pendingKeybindCombo = ""
+    root.keybindRecordError = ""
+    root.keybindApplyStatus = ""
+  }
+
+  function cancelRecordingKeybind() {
+    root.recordingKeybind = false
+    root.pendingKeybindCombo = ""
+    root.keybindRecordError = ""
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function handleKeybindRecordKey(event) {
+    if (event.key === Qt.Key_Escape && event.modifiers === Qt.NoModifier) {
+      root.cancelRecordingKeybind()
+      event.accepted = true
+      return
+    }
+    if (root.isBareModifier(event.key)) { event.accepted = true; return }
+
+    var mods = []
+    if (event.modifiers & Qt.MetaModifier) mods.push("SUPER")
+    if (event.modifiers & Qt.ControlModifier) mods.push("CTRL")
+    if (event.modifiers & Qt.AltModifier) mods.push("ALT")
+    if (event.modifiers & Qt.ShiftModifier) mods.push("SHIFT")
+
+    var keyStr = root.hyprKeyName(event.key)
+    if (keyStr === "") {
+      root.keybindRecordError = "Unsupported key — try a letter, digit, F-key, or punctuation key."
+      event.accepted = true
+      return
+    }
+    if (mods.length === 0) {
+      root.keybindRecordError = "Add a modifier (Super/Ctrl/Alt/Shift) — a bare key would break typing everywhere."
+      event.accepted = true
+      return
+    }
+
+    root.keybindRecordError = ""
+    root.pendingKeybindCombo = mods.join(" + ") + " + " + keyStr
+    event.accepted = true
+  }
+
+  function applyKeybindCombo(combo) {
+    if (combo === "" || root.keybindApplyStatus === "applying") return
+    root.keybindApplyStatus = "applying"
+    root.keybindApplyError = ""
+    keybindProc.pendingApply = combo
+    keybindProc.command = ["bash", root.pluginDir + "/set-keybind.sh", combo]
+    keybindProc.running = true
+  }
+
+  function removeKeybindCombo() {
+    if (root.keybindCombo === "" || root.keybindApplyStatus === "applying") return
+    root.keybindApplyStatus = "applying"
+    root.keybindApplyError = ""
+    keybindProc.pendingApply = ""
+    keybindProc.command = ["bash", root.pluginDir + "/set-keybind.sh", "__REMOVE__"]
+    keybindProc.running = true
+  }
+
+  // ---- Keyboard cursor navigation. Up/Down (arrows or j/k, via
+  //      PanelKeyCatcher) move a highlight between every focusable control;
+  //      Space/Enter activates whichever one it's on. Order matches the
+  //      panel's visual top-to-bottom layout, filtered down to whatever's
+  //      actually visible right now (the keybind row swaps Default/Record/
+  //      Remove for nothing at all once recording takes over the whole
+  //      panel via PanelKeyCatcher.blocked).
+  function currentFocusOrder() {
+    var order = ["power", "ip", "save", "label", "keybindDefault", "keybindRecord"]
+    if (root.keybindCombo !== "") order.push("keybindRemove")
+    return order
+  }
+
+  function moveCursor(delta) {
+    root.cursorActive = true
+    var order = root.currentFocusOrder()
+    var idx = order.indexOf(root.focusSection)
+    idx = idx === -1 ? 0 : Math.max(0, Math.min(order.length - 1, idx + delta))
+    root.focusSection = order[idx]
+  }
+
+  function activateCursor() {
+    root.cursorActive = true
+    if (root.focusSection === "power") root.toggleWaynergy()
+    else if (root.focusSection === "ip") Qt.callLater(function() { ipField.forceActiveFocus(); ipField.selectAll() })
+    else if (root.focusSection === "save") { if (saveButton.enabled) root.saveIp() }
+    else if (root.focusSection === "label") root.setShowLabel(!root.showLabel)
+    else if (root.focusSection === "keybindDefault") { if (keybindDefaultButton.enabled) root.applyKeybindCombo("CTRL + SUPER + Y") }
+    else if (root.focusSection === "keybindRecord") { if (keybindRecordButton.enabled) root.startRecordingKeybind() }
+    else if (root.focusSection === "keybindRemove") { if (keybindRemoveButton.visible && keybindRemoveButton.enabled) root.removeKeybindCombo() }
   }
 
   Component.onCompleted: {
@@ -204,6 +341,28 @@ Panel {
     }
   }
 
+  Process {
+    id: keybindProc
+    property string pendingApply: ""
+    stderr: StdioCollector {
+      id: keybindErr
+      waitForEnd: true
+    }
+    onExited: function(exitCode) {
+      if (exitCode === 0) {
+        root.keybindCombo = keybindProc.pendingApply
+        root.keybindApplyStatus = ""
+        root.keybindApplyError = ""
+        root.recordingKeybind = false
+        root.pendingKeybindCombo = ""
+        persistSettings()
+      } else {
+        root.keybindApplyStatus = "error"
+        root.keybindApplyError = (keybindErr.text || "").trim() || "Failed to apply keybind."
+      }
+    }
+  }
+
   Timer {
     id: startCheckTimer
     interval: 800
@@ -240,171 +399,318 @@ Panel {
     centerOnBar: false
     focusTarget: keyCatcher
     contentWidth: panel.fittedContentWidth(Style.space(320))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(520))
+    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(560))
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
-      blocked: ipField.activeFocus
+      clip: true
+      blocked: ipField.activeFocus || root.recordingKeybind
       onCloseRequested: root.close()
+      onMoveRequested: function(dx, dy) { if (dy !== 0) root.moveCursor(dy) }
+      onActivateRequested: root.activateCursor()
       onTextKey: function(t) {
         if (t === "s" || t === "S") root.toggleWaynergy()
       }
 
-      Column {
-        id: column
-        width: parent.width
-        spacing: Style.spacing.lg
+      Flickable {
+        id: panelFlick
+        anchors.fill: parent
+        contentWidth: width
+        contentHeight: column.implicitHeight
+        clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        flickableDirection: Flickable.VerticalFlick
+        interactive: contentHeight > height
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
-        PanelHero {
-          id: hero
-          width: parent.width
-          title: "Waynergy"
-          meta: root.statusText
-          foreground: root.contentForeground
-          fontFamily: root.contentFontFamily
-          iconOpacity: root.running ? 1.0 : 0.5
-          iconComponent: Component {
-            Text {
-              text: "⏻"
-              color: root.running ? root.contentForeground : root.dim
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.display
+        Column {
+          id: column
+          width: panelFlick.width
+          spacing: Style.spacing.lg
+
+          PanelHero {
+            id: hero
+            width: parent.width
+            title: "Waynergy"
+            meta: root.statusText
+            foreground: root.contentForeground
+            fontFamily: root.contentFontFamily
+            iconOpacity: root.running ? 1.0 : 0.5
+            iconComponent: Component {
+              Text {
+                text: "⏻"
+                color: root.running ? root.contentForeground : root.dim
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.display
+              }
             }
-          }
 
-          trailingControl: Component {
-            ToggleSwitch {
-              id: powerSwitch
-              checked: root.running
-              interactive: root.installed
-              foreground: hero.foreground
-              onToggled: root.toggleWaynergy()
+            trailingControl: Component {
+              ToggleSwitch {
+                id: powerSwitch
+                checked: root.running
+                interactive: root.installed
+                hasCursor: root.cursorActive && root.focusSection === "power"
+                foreground: hero.foreground
+                onToggled: root.toggleWaynergy()
 
-              PanelToolTip {
-                visible: powerSwitch.containsMouse
-                text: root.installed ? (root.running ? "Stop waynergy" : "Start waynergy") : "Waynergy isn't installed"
-                fontFamily: hero.fontFamily
+                PanelToolTip {
+                  visible: powerSwitch.containsMouse
+                  text: root.installed ? (root.running ? "Stop waynergy" : "Start waynergy") : "Waynergy isn't installed"
+                  fontFamily: hero.fontFamily
+                }
               }
             }
           }
-        }
 
-        BorderSurface {
-          id: statusPill
-          visible: root.statusMessage !== ""
-          width: parent.width
-          height: Math.max(Style.spacing.controlHeight, statusPillText.implicitHeight + Style.spacing.sm * 2)
-          color: Style.normalFillFor(root.contentForeground)
-          borderSpec: Border.controlSpec("normal", root.contentForeground, Color.accent)
-          radius: Style.cornerRadius
-
-          Text {
-            id: statusPillText
-            anchors.fill: parent
-            anchors.margins: Style.spacing.sm
-            horizontalAlignment: Text.AlignHCenter
-            verticalAlignment: Text.AlignVCenter
-            wrapMode: Text.WordWrap
-            text: root.statusMessage
-            color: root.statusIsError ? Color.urgent : root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-          }
-        }
-
-        PanelSeparator {
-          foreground: root.contentForeground
-        }
-
-        Column {
-          width: parent.width
-          spacing: Style.spacing.sm
-
-          PanelSectionHeader {
-            text: "CONNECTION"
-            foreground: root.contentForeground
-            fontFamily: root.contentFontFamily
-          }
-
-          GridLayout {
+          BorderSurface {
+            id: statusPill
+            visible: root.statusMessage !== ""
             width: parent.width
-            columns: 2
-            columnSpacing: Style.space(20)
-            rowSpacing: Style.spacing.labelGap
+            height: Math.max(Style.spacing.controlHeight, statusPillText.implicitHeight + Style.spacing.sm * 2)
+            color: Style.normalFillFor(root.contentForeground)
+            borderSpec: Border.controlSpec("normal", root.contentForeground, Color.accent)
+            radius: Style.cornerRadius
 
-            DetailLabel { text: "Host" }
-            DetailValue {
-              text: root.ip
-              copyable: true
-              tooltipText: "Copy host IP"
+            Text {
+              id: statusPillText
+              anchors.fill: parent
+              anchors.margins: Style.spacing.sm
+              horizontalAlignment: Text.AlignHCenter
+              verticalAlignment: Text.AlignVCenter
+              wrapMode: Text.WordWrap
+              text: root.statusMessage
+              color: root.statusIsError ? Color.urgent : root.contentForeground
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+
+          PanelSeparator {
+            foreground: root.contentForeground
+          }
+
+          Column {
+            width: parent.width
+            spacing: Style.spacing.sm
+
+            PanelSectionHeader {
+              text: "CONNECTION"
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
             }
 
-            DetailLabel { text: "Port" }
-            DetailValue { text: String(root.port) }
+            GridLayout {
+              width: parent.width
+              columns: 2
+              columnSpacing: Style.space(20)
+              rowSpacing: Style.spacing.labelGap
+
+              DetailLabel { text: "Host" }
+              DetailValue {
+                text: root.ip
+                copyable: true
+                tooltipText: "Copy host IP"
+              }
+
+              DetailLabel { text: "Port" }
+              DetailValue { text: String(root.port) }
+            }
+
+            RowLayout {
+              width: parent.width
+              spacing: Style.spacing.sm
+
+              TextField {
+                id: ipField
+                Layout.fillWidth: true
+                activeFocusOnTab: false
+                hasCursor: root.cursorActive && root.focusSection === "ip" && !ipField.activeFocus
+                placeholderText: "192.168.1.5"
+                text: root.ipDraft
+                onTextChanged: { root.ipDraft = text; root.ipError = "" }
+                onAccepted: root.saveIp()
+                Keys.onEscapePressed: {
+                  ipField.focus = false
+                  root.cursorActive = true
+                  root.focusSection = "ip"
+                  Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+                }
+              }
+
+              PanelActionButton {
+                id: saveButton
+                iconText: "󰄬"
+                tooltipText: "Save"
+                foreground: root.contentForeground
+                hasCursor: root.cursorActive && root.focusSection === "save"
+                enabled: root.ipDraft.trim() !== "" && root.ipDraft.trim() !== root.ip
+                Layout.alignment: Qt.AlignVCenter
+                onClicked: root.saveIp()
+              }
+            }
+
+            Text {
+              visible: root.ipError !== ""
+              width: parent.width
+              text: root.ipError
+              color: Color.urgent
+              wrapMode: Text.WordWrap
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
+
+          PanelSeparator {
+            foreground: root.contentForeground
           }
 
           RowLayout {
             width: parent.width
             spacing: Style.spacing.sm
 
-            TextField {
-              id: ipField
-              Layout.fillWidth: true
-              activeFocusOnTab: false
-              placeholderText: "192.168.1.5"
-              text: root.ipDraft
-              onTextChanged: { root.ipDraft = text; root.ipError = "" }
-              onAccepted: root.saveIp()
-              Keys.onEscapePressed: root.close()
-            }
-
-            PanelActionButton {
-              id: saveButton
-              iconText: "󰄬"
-              tooltipText: "Save"
+            ToggleSwitch {
+              id: labelSwitch
+              checked: root.showLabel
+              hasCursor: root.cursorActive && root.focusSection === "label"
               foreground: root.contentForeground
-              enabled: root.ipDraft.trim() !== "" && root.ipDraft.trim() !== root.ip
               Layout.alignment: Qt.AlignVCenter
-              onClicked: root.saveIp()
+              onToggled: root.setShowLabel(!root.showLabel)
+            }
+
+            Text {
+              text: "Show \"Waynergy\" label in the bar"
+              color: root.contentForeground
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.body
+              wrapMode: Text.WordWrap
+              Layout.fillWidth: true
+              Layout.alignment: Qt.AlignVCenter
             }
           }
 
-          Text {
-            visible: root.ipError !== ""
-            width: parent.width
-            text: root.ipError
-            color: Color.urgent
-            wrapMode: Text.WordWrap
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.bodySmall
-          }
-        }
-
-        PanelSeparator {
-          foreground: root.contentForeground
-        }
-
-        RowLayout {
-          width: parent.width
-          spacing: Style.spacing.sm
-
-          ToggleSwitch {
-            id: labelSwitch
-            checked: root.showLabel
+          PanelSeparator {
             foreground: root.contentForeground
-            Layout.alignment: Qt.AlignVCenter
-            onToggled: root.setShowLabel(!root.showLabel)
           }
 
-          Text {
-            text: "Show \"Waynergy\" label in the bar"
-            color: root.contentForeground
-            font.family: root.contentFontFamily
-            font.pixelSize: Style.font.body
-            wrapMode: Text.WordWrap
-            Layout.fillWidth: true
-            Layout.alignment: Qt.AlignVCenter
+          Column {
+            width: parent.width
+            spacing: Style.spacing.sm
+
+            PanelSectionHeader {
+              text: "KEYBOARD SHORTCUT"
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+            }
+
+            Text {
+              width: parent.width
+              text: root.keybindCombo !== "" ? ("Current: " + root.keybindCombo) : "No shortcut set."
+              color: Qt.darker(root.contentForeground, 1.3)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+
+            Row {
+              visible: !root.recordingKeybind
+              spacing: Style.spacing.sm
+
+              Button {
+                id: keybindDefaultButton
+                text: "Ctrl+Super+Y"
+                foreground: root.contentForeground
+                hasCursor: root.cursorActive && root.focusSection === "keybindDefault"
+                selected: root.keybindCombo === "CTRL + SUPER + Y"
+                enabled: root.keybindApplyStatus !== "applying" && root.keybindCombo !== "CTRL + SUPER + Y"
+                onClicked: root.applyKeybindCombo("CTRL + SUPER + Y")
+              }
+
+              Button {
+                id: keybindRecordButton
+                text: "Record custom…"
+                foreground: root.contentForeground
+                hasCursor: root.cursorActive && root.focusSection === "keybindRecord"
+                enabled: root.keybindApplyStatus !== "applying"
+                onClicked: root.startRecordingKeybind()
+              }
+
+              Button {
+                id: keybindRemoveButton
+                text: "Remove"
+                foreground: root.contentForeground
+                hasCursor: root.cursorActive && root.focusSection === "keybindRemove"
+                visible: root.keybindCombo !== ""
+                enabled: root.keybindApplyStatus !== "applying"
+                onClicked: root.removeKeybindCombo()
+              }
+            }
+
+            Column {
+              visible: root.recordingKeybind
+              width: parent.width
+              spacing: Style.spacing.xs
+
+              Rectangle {
+                width: parent.width
+                height: Style.spacing.controlHeight + Style.spacing.sm * 2
+                radius: Style.cornerRadius
+                color: Style.hoverFillFor(root.contentForeground, Color.accent)
+                border.width: 1
+                border.color: Qt.rgba(root.contentForeground.r, root.contentForeground.g, root.contentForeground.b, 0.4)
+
+                Text {
+                  anchors.centerIn: parent
+                  text: root.pendingKeybindCombo !== "" ? root.pendingKeybindCombo : "Press a shortcut…"
+                  color: root.contentForeground
+                  font.family: root.contentFontFamily
+                  font.pixelSize: Style.font.body
+                }
+
+                Item {
+                  id: keybindRecorder
+                  anchors.fill: parent
+                  focus: root.recordingKeybind
+                  Keys.onPressed: function(event) { root.handleKeybindRecordKey(event) }
+                }
+              }
+
+              Text {
+                width: parent.width
+                text: root.keybindRecordError !== "" ? root.keybindRecordError : "Hold your modifiers and press a key. Esc cancels."
+                color: root.keybindRecordError !== "" ? Color.urgent : Qt.darker(root.contentForeground, 1.4)
+                wrapMode: Text.WordWrap
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.caption
+              }
+
+              Row {
+                spacing: Style.spacing.sm
+
+                Button {
+                  text: "Apply"
+                  foreground: root.contentForeground
+                  enabled: root.pendingKeybindCombo !== "" && root.keybindApplyStatus !== "applying"
+                  onClicked: root.applyKeybindCombo(root.pendingKeybindCombo)
+                }
+
+                Button {
+                  text: "Cancel"
+                  foreground: root.contentForeground
+                  onClicked: root.cancelRecordingKeybind()
+                }
+              }
+            }
+
+            Text {
+              visible: root.keybindApplyStatus === "error"
+              width: parent.width
+              text: root.keybindApplyError
+              color: Color.urgent
+              wrapMode: Text.WordWrap
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
           }
         }
       }

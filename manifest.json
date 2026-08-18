@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "id": "io.github.aryan-techie.waynergy",
   "name": "Waynergy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "author": "aryan-techie",
   "license": "MIT",
-  "description": "One-click start/stop for waynergy from the bar. Right-click to change the host IP.",
+  "description": "One-click start/stop for waynergy from the bar, a settings panel, and an optional global keyboard shortcut.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "Waynergy",
-    "description": "Start/stop waynergy with one click; right-click to set the host IP",
+    "description": "Right-click to start/stop waynergy; left-click for IP settings and a keyboard shortcut",
     "category": "Network",
     "allowMultiple": false,
     "defaultSection": "right"
