@@ -49,6 +49,16 @@ Panel {
   property string lastError: ""
   property bool startPending: false
 
+  // ---- Live uptime stat. Not persisted — stamped on start, cleared on
+  //      stop, and (for "was already running when the plugin loaded")
+  //      stamped the first time a status poll confirms it without one.
+  property double runningSinceMs: 0
+  property int uptimeTick: 0
+
+  // ---- Known hosts: last few saved IPs, for one-click switching (the
+  //      direct analog of the built-in Wi-Fi panel's Known Networks list).
+  property var recentIps: []
+
   // ---- Keyboard shortcut (mirrors the todoist plugin's recorder exactly).
   property string keybindCombo: ""
   property bool recordingKeybind: false
@@ -76,6 +86,15 @@ Panel {
     return root.lastError
   }
   readonly property bool statusIsError: root.statusMessage !== "" && !root.startPending
+
+  readonly property string uptimeText: {
+    root.uptimeTick // referenced only to force re-evaluation once a second
+    if (!root.running || root.runningSinceMs === 0) return "--"
+    var secs = Math.max(0, Math.floor((Date.now() - root.runningSinceMs) / 1000))
+    var m = Math.floor(secs / 60)
+    var s = secs % 60
+    return m + "m " + (s < 10 ? "0" : "") + s + "s"
+  }
 
   onOpenedChanged: if (root.opened) {
     root.ipDraft = root.ip
@@ -110,6 +129,7 @@ Panel {
     root.startPending = true
     Quickshell.execDetached(["waynergy", "-c", root.ip, "-p", String(root.port), "-E"])
     root.running = true
+    root.runningSinceMs = Date.now()
     startCheckTimer.restart()
   }
 
@@ -117,6 +137,7 @@ Panel {
     root.startPending = false
     root.lastError = ""
     root.running = false
+    root.runningSinceMs = 0
     stopProc.running = true
   }
 
@@ -148,6 +169,35 @@ Panel {
     root.ipDraft = value
     root.ipError = ""
     root.lastError = ""
+    rememberIp(value)
+    persistSettings()
+  }
+
+  // Push-to-front, dedupe, cap-5 — same idiom the built-in Tailscale panel
+  // uses for its recent Mullvad regions.
+  function rememberIp(value) {
+    var next = [value]
+    for (var i = 0; i < root.recentIps.length && next.length < 5; i++) {
+      var existing = root.recentIps[i]
+      if (existing !== value && next.indexOf(existing) === -1) next.push(existing)
+    }
+    root.recentIps = next
+  }
+
+  // Switching a known host updates the target for the *next* start — an
+  // already-running session is left alone rather than silently restarted.
+  function switchToIp(value) {
+    if (!isValidIp(value)) return
+    root.ip = value
+    root.ipDraft = value
+    root.ipError = ""
+    root.lastError = ""
+    rememberIp(value)
+    persistSettings()
+  }
+
+  function forgetIp(value) {
+    root.recentIps = root.recentIps.filter(function(v) { return v !== value })
     persistSettings()
   }
 
@@ -166,13 +216,21 @@ Panel {
     if (typeof parsed.ip === "string" && isValidIp(parsed.ip)) root.ip = String(parsed.ip).trim()
     if (typeof parsed.showLabel === "boolean") root.showLabel = parsed.showLabel
     if (typeof parsed.keybind === "string") root.keybindCombo = parsed.keybind
+    if (Array.isArray(parsed.recentIps)) {
+      var loaded = []
+      for (var i = 0; i < parsed.recentIps.length && loaded.length < 5; i++) {
+        var candidate = String(parsed.recentIps[i] || "").trim()
+        if (isValidIp(candidate) && loaded.indexOf(candidate) === -1) loaded.push(candidate)
+      }
+      root.recentIps = loaded
+    }
     root.ipDraft = root.ip
     root.settingsLoaded = true
     refreshStatus()
   }
 
   function persistSettings() {
-    settingsFile.setText(JSON.stringify({ ip: root.ip, showLabel: root.showLabel, keybind: root.keybindCombo }, null, 2) + "\n")
+    settingsFile.setText(JSON.stringify({ ip: root.ip, showLabel: root.showLabel, keybind: root.keybindCombo, recentIps: root.recentIps }, null, 2) + "\n")
   }
 
   // ---- Keyboard shortcut recording. Mirrors a stripped-down Hyprland key
@@ -272,7 +330,9 @@ Panel {
   //      Remove for nothing at all once recording takes over the whole
   //      panel via PanelKeyCatcher.blocked).
   function currentFocusOrder() {
-    var order = ["power", "ip", "save", "label", "keybindDefault", "keybindRecord"]
+    var order = ["power", "refresh", "ip", "save"]
+    for (var i = 0; i < root.recentIps.length; i++) order.push("knownIp" + i)
+    order.push("label", "keybindDefault", "keybindRecord")
     if (root.keybindCombo !== "") order.push("keybindRemove")
     return order
   }
@@ -288,12 +348,17 @@ Panel {
   function activateCursor() {
     root.cursorActive = true
     if (root.focusSection === "power") root.toggleWaynergy()
+    else if (root.focusSection === "refresh") root.refreshStatus()
     else if (root.focusSection === "ip") Qt.callLater(function() { ipField.forceActiveFocus(); ipField.selectAll() })
     else if (root.focusSection === "save") { if (saveButton.enabled) root.saveIp() }
     else if (root.focusSection === "label") root.setShowLabel(!root.showLabel)
     else if (root.focusSection === "keybindDefault") { if (keybindDefaultButton.enabled) root.applyKeybindCombo("CTRL + SUPER + Y") }
     else if (root.focusSection === "keybindRecord") { if (keybindRecordButton.enabled) root.startRecordingKeybind() }
     else if (root.focusSection === "keybindRemove") { if (keybindRemoveButton.visible && keybindRemoveButton.enabled) root.removeKeybindCombo() }
+    else if (root.focusSection.indexOf("knownIp") === 0) {
+      var idx = parseInt(root.focusSection.substring(7), 10)
+      if (idx >= 0 && idx < root.recentIps.length) root.switchToIp(root.recentIps[idx])
+    }
   }
 
   Component.onCompleted: {
@@ -327,6 +392,9 @@ Panel {
         root.lastError = "Waynergy exited right after starting — check the IP (" + root.ip + ") and that the host is reachable."
       } else if (isRunning) {
         root.lastError = ""
+        if (root.runningSinceMs === 0) root.runningSinceMs = Date.now()
+      } else {
+        root.runningSinceMs = 0
       }
       root.startPending = false
       root.running = isRunning
@@ -376,6 +444,14 @@ Panel {
     running: root.settingsLoaded
     repeat: true
     onTriggered: root.refreshStatus()
+  }
+
+  Timer {
+    id: uptimeTimer
+    interval: 1000
+    running: root.running && root.runningSinceMs > 0
+    repeat: true
+    onTriggered: root.uptimeTick++
   }
 
   FileView {
@@ -447,18 +523,31 @@ Panel {
             }
 
             trailingControl: Component {
-              ToggleSwitch {
-                id: powerSwitch
-                checked: root.running
-                interactive: root.installed
-                hasCursor: root.cursorActive && root.focusSection === "power"
-                foreground: hero.foreground
-                onToggled: root.toggleWaynergy()
+              Row {
+                spacing: Style.space(6)
 
-                PanelToolTip {
-                  visible: powerSwitch.containsMouse
-                  text: root.installed ? (root.running ? "Stop waynergy" : "Start waynergy") : "Waynergy isn't installed"
-                  fontFamily: hero.fontFamily
+                PanelActionButton {
+                  id: refreshButton
+                  iconText: "↻"
+                  tooltipText: "Refresh status"
+                  foreground: hero.foreground
+                  hasCursor: root.cursorActive && root.focusSection === "refresh"
+                  onClicked: root.refreshStatus()
+                }
+
+                ToggleSwitch {
+                  id: powerSwitch
+                  checked: root.running
+                  interactive: root.installed
+                  hasCursor: root.cursorActive && root.focusSection === "power"
+                  foreground: hero.foreground
+                  onToggled: root.toggleWaynergy()
+
+                  PanelToolTip {
+                    visible: powerSwitch.containsMouse
+                    text: root.installed ? (root.running ? "Stop waynergy" : "Start waynergy") : "Waynergy isn't installed"
+                    fontFamily: hero.fontFamily
+                  }
                 }
               }
             }
@@ -503,7 +592,7 @@ Panel {
 
             GridLayout {
               width: parent.width
-              columns: 2
+              columns: 4
               columnSpacing: Style.space(20)
               rowSpacing: Style.spacing.labelGap
 
@@ -513,9 +602,11 @@ Panel {
                 copyable: true
                 tooltipText: "Copy host IP"
               }
-
               DetailLabel { text: "Port" }
               DetailValue { text: String(root.port) }
+
+              DetailLabel { text: "Uptime" }
+              DetailValue { text: root.uptimeText }
             }
 
             RowLayout {
@@ -559,6 +650,39 @@ Panel {
               wrapMode: Text.WordWrap
               font.family: root.contentFontFamily
               font.pixelSize: Style.font.bodySmall
+            }
+          }
+
+          PanelSeparator {
+            visible: root.recentIps.length > 0
+            foreground: root.contentForeground
+          }
+
+          Column {
+            visible: root.recentIps.length > 0
+            width: parent.width
+            spacing: Style.spacing.sm
+
+            PanelSectionHeader {
+              text: "KNOWN HOSTS"
+              foreground: root.contentForeground
+              fontFamily: root.contentFontFamily
+            }
+
+            Column {
+              width: parent.width
+              spacing: Style.space(6)
+
+              Repeater {
+                model: root.recentIps
+                KnownHostRow {
+                  required property var modelData
+                  required property int index
+                  width: parent.width
+                  hostIp: modelData
+                  rowIndex: index
+                }
+              }
             }
           }
 
@@ -713,6 +837,78 @@ Panel {
             }
           }
         }
+      }
+    }
+  }
+
+  component KnownHostRow: CursorSurface {
+    id: hostRow
+    property string hostIp: ""
+    property int rowIndex: 0
+    readonly property bool active: hostRow.hostIp === root.ip
+
+    hasCursor: root.cursorActive && root.focusSection === ("knownIp" + hostRow.rowIndex)
+    current: hostRow.active
+    foreground: root.contentForeground
+    implicitHeight: rowContent.implicitHeight + Style.spacing.rowPaddingX
+
+    // Declared before rowContent so it sits underneath in stacking order —
+    // the PanelActionButton inside rowContent needs to receive its own
+    // clicks rather than have this row-wide area steal them (matches the
+    // built-in Tailscale panel's PeerRow: its hover MouseArea sits under
+    // the row's own action buttons the same way).
+    MouseArea {
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onEntered: { root.cursorActive = true; root.focusSection = "knownIp" + hostRow.rowIndex }
+      onClicked: root.switchToIp(hostRow.hostIp)
+    }
+
+    RowLayout {
+      id: rowContent
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(8)
+      spacing: Style.space(8)
+
+      Text {
+        text: hostRow.active && root.running ? "●" : "○"
+        color: hostRow.active ? root.contentForeground : root.dim
+        font.family: root.contentFontFamily
+        font.pixelSize: Style.font.body
+      }
+
+      ColumnLayout {
+        Layout.fillWidth: true
+        spacing: 0
+
+        Text {
+          Layout.fillWidth: true
+          text: hostRow.hostIp
+          color: root.contentForeground
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.body
+          elide: Text.ElideRight
+        }
+
+        Text {
+          visible: hostRow.active
+          text: root.running ? "Running" : "Active"
+          color: Qt.darker(root.contentForeground, 1.4)
+          font.family: root.contentFontFamily
+          font.pixelSize: Style.font.caption
+        }
+      }
+
+      PanelActionButton {
+        iconText: "✕"
+        tooltipText: "Forget"
+        foreground: root.contentForeground
+        Layout.alignment: Qt.AlignVCenter
+        onClicked: root.forgetIp(hostRow.hostIp)
       }
     }
   }

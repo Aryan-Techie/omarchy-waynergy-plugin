@@ -2,6 +2,20 @@
 
 All notable user-facing changes to this plugin. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v1.2.0 — Wi-Fi-panel-style restyle, live uptime, Known Hosts
+
+### Added
+
+- A refresh icon button in the panel header, next to the power toggle (mirrors the
+  built-in Wi-Fi panel's header actions).
+- A live **Uptime** stat in the connection-details grid, which is now a 4-column layout
+  (Host/Port on one row, Uptime below) matching the Wi-Fi panel's paired-column density.
+- **Known Hosts**: the last 5 saved IPs appear as clickable rows below the IP field — the
+  direct analog of the Wi-Fi panel's Known Networks list. Click one to switch the active
+  target instantly (an already-running session is left alone; the new target takes effect
+  on the next start), or forget it with the small ✕ button. Fully reachable via the
+  existing arrow-key navigation.
+
 ## v1.1.0 — Keyboard shortcut and full keyboard navigation
 
 ### Added

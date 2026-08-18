@@ -58,14 +58,19 @@ this plugin has nothing to connect to — it's the client-side control only.
 - **Right click** — toggle: starts `waynergy -c <ip> -p 24800 -E` if it's
   not running, kills it (`pkill -x waynergy`) if it is. No panel opens.
 - **Left click** — opens a panel with:
-  - A power toggle (does the same start/stop as the bar's right click).
+  - A power toggle and a refresh button in the header, next to the status line.
   - A status pill that actually tells you what's wrong instead of staying
     silent: "Waynergy isn't installed or not on `PATH`." if it can't find
     the binary, or "Waynergy exited right after starting — check the IP
     and that the host is reachable." if a start attempt dies immediately.
-  - A connection-details grid (Host, Port) — click the host IP to copy it.
+  - A connection-details grid (Host, Port, live Uptime) — click the host IP
+    to copy it.
   - A text field to change the host IP, saved with the checkmark button
     next to it.
+  - **Known Hosts** — your last 5 saved IPs as one-click rows, so switching
+    between two PCs doesn't mean retyping an address. Tap one to make it
+    the active target (an already-running session keeps running against
+    the old one until you restart it); forget one with the small ✕.
   - A switch to show/hide the "Waynergy" label in the bar (leaves just the
     dot).
   - A keyboard shortcut recorder — set once, works from anywhere.
@@ -117,7 +122,7 @@ run `omarchy-shell shell rescanPlugins` if it doesn't pick up right away).
 | Action | Effect |
 |---|---|
 | Right click | Start waynergy if stopped, kill it if running |
-| Left click | Open the panel (status + power toggle + connection details + IP field + label switch + keyboard shortcut) |
+| Left click | Open the panel (status + power toggle + connection details + IP field + Known Hosts + label switch + keyboard shortcut) |
 | Middle click | Refresh the running-state check immediately |
 
 ### Keyboard shortcut
@@ -139,8 +144,9 @@ a config error, the backup is restored automatically and nothing changes.
 Once the panel is open:
 
 - **Up / Down** (or **j** / **k**) — move the highlight between every
-  control: the power toggle, the IP field, the Save button, the label
-  switch, and the keyboard-shortcut buttons.
+  control: the power toggle, the refresh button, the IP field, the Save
+  button, any Known Hosts rows, the label switch, and the keyboard-shortcut
+  buttons.
 - **Space** or **Enter** — activate whatever's highlighted: flips a toggle,
   focuses the IP field for typing, or clicks a button.
 - **Escape** — while actually typing in the IP field, the first Escape just
@@ -166,17 +172,18 @@ Once the panel is open:
 
 ## State files
 
-The host IP, label-visibility setting, and keyboard shortcut are stored at:
+The host IP, label-visibility setting, keyboard shortcut, and the last 5
+saved IPs (Known Hosts) are stored at:
 
 ```
 ~/.local/state/omarchy/io.github.aryan-techie.waynergy/settings.json
 ```
 
-It's `{ "ip": "...", "showLabel": true, "keybind": "..." }` — nothing else
-is written anywhere on disk except the one `~/.config/hypr/bindings.lua`
-line described above, and nothing is sent over the network by this plugin
-itself (the IP is only ever handed to `waynergy` as a `-c` argument, never
-shell-interpolated).
+It's `{ "ip": "...", "showLabel": true, "keybind": "...", "recentIps": [...] }`
+— nothing else is written anywhere on disk except the one
+`~/.config/hypr/bindings.lua` line described above, and nothing is sent
+over the network by this plugin itself (the IP is only ever handed to
+`waynergy` as a `-c` argument, never shell-interpolated).
 
 ## Uninstalling
 
