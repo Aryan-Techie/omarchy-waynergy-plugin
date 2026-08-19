@@ -1165,6 +1165,7 @@ Panel {
                 iconText: "✕"
                 tooltipText: "Remove shortcut"
                 bordered: true
+                size: keybindDefaultButton.height
                 foreground: root.contentForeground
                 hasCursor: root.cursorActive && root.focusSection === "keybindRemove"
                 visible: root.keybindCombo !== ""
