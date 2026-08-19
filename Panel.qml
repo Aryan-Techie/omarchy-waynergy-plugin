@@ -843,6 +843,11 @@ Panel {
               DetailValue { text: String(root.port) }
             }
 
+            Item {
+              width: 1
+              height: Style.space(8)
+            }
+
             Text {
               width: parent.width
               text: "IP of the PC running the waynergy/Synergy server. Add :port to override the default (" + root.defaultPort + ")."
