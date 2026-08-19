@@ -1121,7 +1121,7 @@ Panel {
             spacing: Style.spacing.sm
 
             PanelSectionHeader {
-              text: "KEYBOARD SHORTCUT"
+              text: "HOTKEY"
               foreground: root.contentForeground
               fontFamily: root.contentFontFamily
             }
