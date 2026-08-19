@@ -1160,9 +1160,10 @@ Panel {
                 onClicked: root.startRecordingKeybind()
               }
 
-              Button {
+              PanelActionButton {
                 id: keybindRemoveButton
-                text: "Remove"
+                iconText: "✕"
+                tooltipText: "Remove shortcut"
                 bordered: true
                 foreground: root.contentForeground
                 hasCursor: root.cursorActive && root.focusSection === "keybindRemove"
