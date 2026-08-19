@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/waynergy-icon.png" height="140" alt="">
+<img src="assets/waynergy-icon.png" height="180" alt="Waynergy logo — a cursor moving from one screen to another">
 
 # Waynergy for Omarchy
 
