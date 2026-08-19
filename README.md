@@ -59,7 +59,11 @@ this plugin has nothing to connect to — it's the client-side control only.
 - **Right click** — toggle: starts `waynergy -c <host> -p <port> -E` if it's
   not running, kills it (`pkill -x waynergy`) if it is. No panel opens.
 - **Left click** — opens a panel with:
-  - A power toggle in the header, next to the status line.
+  - A power toggle in the header, next to a status line that rotates
+    through a few silly phrases while actually connected ("Sharing
+    keystrokes", "Herding cursors", ...) — same idiom as the built-in
+    Wi-Fi and Bluetooth panels — and drops to a plain word (Stopped, Not
+    responding, Starting…) whenever something needs your attention instead.
   - A status pill that actually tells you what's wrong instead of staying
     silent: not installed, a start attempt that died immediately, the
     process running but the host not answering, or it stopping on its own

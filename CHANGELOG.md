@@ -2,6 +2,18 @@
 
 All notable user-facing changes to this plugin. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v1.3.1 — Rotating status phrases, bigger panel
+
+### Changed
+
+- The header status line now rotates through a few phrases while connected
+  ("Sharing keystrokes", "Herding cursors", ...), matching the built-in
+  Wi-Fi and Bluetooth panels' own idiom, and falls back to a plain word
+  (Stopped / Starting… / Not responding / Not installed) whenever there's
+  something to pay attention to instead.
+- Panel is now the same width as the built-in Wi-Fi/Bluetooth panels
+  (`380` vs `320`) and sizes its height naturally instead of capping early.
+
 ## v1.3.0 — Configurable port, real reachability check, notifications
 
 ### Added

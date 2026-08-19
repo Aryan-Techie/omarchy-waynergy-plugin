@@ -88,7 +88,30 @@ Panel {
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color dim: Qt.darker(contentForeground, 1.55)
 
-  readonly property string statusText: running ? ("Running — connected to " + hostDisplay) : "Stopped"
+  // Rotating hero phrases while actually connected — same idiom as the
+  // built-in Wi-Fi ("Counting collisions") and Bluetooth ("Herding
+  // headsets") panels: PanelHero's metaOpacity fades out, phraseIndex
+  // advances, fades back in, on a timer that only runs while it's worth
+  // animating. Falls back to a plain state word the rest of the time.
+  property int phraseIndex: 0
+  readonly property var activePhrases: [
+    "Sharing keystrokes",
+    "Herding cursors",
+    "Passing the mouse",
+    "Bridging desktops",
+    "Syncing clipboards",
+    "Crossing the wire",
+    "Mirroring input",
+    "Routing keypresses"
+  ]
+  readonly property bool rotatingPhrases: root.running && root.reachable !== false
+  readonly property string statusText: {
+    if (!root.installed) return "Not installed"
+    if (root.startPending) return "Starting…"
+    if (!root.running) return "Stopped"
+    if (root.reachable === false) return "Not responding"
+    return root.activePhrases[root.phraseIndex % root.activePhrases.length]
+  }
 
   // Single status line for the pill below the hero: "not installed" always
   // wins (nothing else matters until that's fixed), then a start attempt in
@@ -528,6 +551,39 @@ Panel {
     onTriggered: root.uptimeTick++
   }
 
+  Timer {
+    id: phraseTimer
+    interval: 2800
+    running: root.opened && root.rotatingPhrases
+    repeat: true
+    onTriggered: phraseSwap.restart()
+  }
+
+  SequentialAnimation {
+    id: phraseSwap
+    PropertyAnimation {
+      target: hero; property: "metaOpacity"
+      to: 0.0; duration: 180; easing.type: Easing.OutQuad
+    }
+    ScriptAction {
+      script: root.phraseIndex = (root.phraseIndex + 1) % root.activePhrases.length
+    }
+    PropertyAnimation {
+      target: hero; property: "metaOpacity"
+      to: 1.0; duration: 260; easing.type: Easing.InQuad
+    }
+  }
+
+  Connections {
+    target: root
+    function onRotatingPhrasesChanged() {
+      if (!root.rotatingPhrases) {
+        phraseSwap.stop()
+        hero.metaOpacity = 1.0
+      }
+    }
+  }
+
   FileView {
     id: settingsFile
     path: root.settingsPath
@@ -548,8 +604,8 @@ Panel {
     open: root.opened
     centerOnBar: false
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(320))
-    contentHeight: panel.fittedContentHeight(column.implicitHeight, Style.space(560))
+    contentWidth: panel.fittedContentWidth(Style.space(380))
+    contentHeight: panel.fittedContentHeight(column.implicitHeight)
 
     PanelKeyCatcher {
       id: keyCatcher
