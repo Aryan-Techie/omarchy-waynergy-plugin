@@ -26,8 +26,6 @@ PC's IP changes and you don't want to touch a terminal. It also actually
 checks the connection is alive, not just that the process is running, and
 tells you when either one drops.
 
-![Waynergy panel preview](preview.png)
-
 ## Contents
 
 - [Who this is for](#who-this-is-for)
@@ -45,6 +43,8 @@ tells you when either one drops.
 - [Changelog](#changelog)
 - [License](#license)
 - [Author](#author)
+
+![Waynergy panel preview](preview.png)
 
 ## Who this is for
 
