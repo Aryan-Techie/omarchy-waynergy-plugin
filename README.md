@@ -16,7 +16,7 @@
 
 </div>
 
-![Waynergy panel preview](preview.png)
+![Waynergy — your keyboard & mouse, one click away in Omarchy's top bar](assets/hero-banner.png)
 
 Right-click the bar pill to start waynergy; right-click again to kill it.
 Left-click opens a small panel with the status, a power toggle, connection
@@ -25,6 +25,8 @@ switch to hide the "Waynergy" text next to the dot — handy when the other
 PC's IP changes and you don't want to touch a terminal. It also actually
 checks the connection is alive, not just that the process is running, and
 tells you when either one drops.
+
+![Waynergy panel preview](preview.png)
 
 ## Contents
 
