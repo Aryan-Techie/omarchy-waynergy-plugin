@@ -195,6 +195,8 @@ Once the panel is open:
   exits typing and returns to the highlight (doesn't close the panel); a
   second Escape (or one from anywhere else) closes the panel.
 
+![Waynergy panel, stopped and idle](assets/preview-wallpaper.png)
+
 ## How it works
 
 - **Start:** `waynergy -c <host> -p <port> -E`, launched through a detached
