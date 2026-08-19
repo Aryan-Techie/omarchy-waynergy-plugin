@@ -44,8 +44,6 @@ tells you when either one drops.
 - [License](#license)
 - [Author](#author)
 
-![Waynergy panel preview](preview.png)
-
 ## Who this is for
 
 You use [waynergy](https://github.com/r-c-f/waynergy) (a Wayland-native
@@ -109,6 +107,8 @@ this plugin has nothing to connect to — it's the client-side control only.
   refresh and **S** to toggle from anywhere.
 - No config file editing required — settings live in a small local JSON
   file, edited entirely from the panel.
+
+![Waynergy panel preview](preview.png)
 
 ## Requirements
 
