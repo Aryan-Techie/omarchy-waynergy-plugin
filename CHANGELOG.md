@@ -2,6 +2,21 @@
 
 All notable user-facing changes to this plugin. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v1.3.0 — Configurable port, real reachability check, notifications
+
+### Added
+
+- The host field now accepts `ip:port`, not just a bare IP — leave the port off and it
+  stays on the default `24800`. Known Hosts remembers whichever form you saved.
+- **Real reachability check**: a TCP probe to host:port runs right after every poll that
+  finds the process alive, closing the actual gap that existed before — a live process
+  could previously look "running" even after losing its connection to the host.
+- **Desktop notifications** (via `omarchy-notification-send`, critical urgency): one when
+  waynergy stops on its own after running fine, and one the first time a reachability
+  probe fails while it's still running — not repeated on every subsequent failed poll.
+- The status pill now also surfaces "running, but not responding" as its own message,
+  separate from the existing not-installed / start-failed / stopped-unexpectedly ones.
+
 ## v1.2.1 — Drop the header refresh button, fix a layout overflow
 
 ### Changed

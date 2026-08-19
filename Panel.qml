@@ -31,13 +31,26 @@ Panel {
   readonly property string stateDir: homeDir + "/.local/state/omarchy/io.github.aryan-techie.waynergy"
   readonly property string settingsPath: stateDir + "/settings.json"
 
-  readonly property int port: 24800
+  readonly property int defaultPort: 24800
   property string ip: "192.168.1.5"
+  property int port: defaultPort
   property string ipDraft: ip
   property string ipError: ""
   property bool running: false
   property bool showLabel: true
   property bool settingsLoaded: false
+
+  // "192.168.1.5" when on the default port, "192.168.1.5:9999" otherwise —
+  // the one canonical string used for display, Known Hosts entries, and
+  // round-tripping through the IP field.
+  readonly property string hostDisplay: root.port === root.defaultPort ? root.ip : (root.ip + ":" + root.port)
+
+  // Tri-state (null = not checked yet / not running): whether the last TCP
+  // probe to host:port while running actually got through. Separate from
+  // `running`, which only means the local process is alive — the real gap
+  // that was missing before: a live process can still be talking to
+  // nothing if the other side dropped off the network.
+  property var reachable: null
 
   // Optimistic true until the first `which waynergy` check lands, so the
   // panel doesn't flash "not installed" for the split second before that
@@ -75,14 +88,16 @@ Panel {
   readonly property string contentFontFamily: bar ? bar.fontFamily : Style.font.family
   readonly property color dim: Qt.darker(contentForeground, 1.55)
 
-  readonly property string statusText: running ? ("Running — connected to " + ip) : "Stopped"
+  readonly property string statusText: running ? ("Running — connected to " + hostDisplay) : "Stopped"
 
   // Single status line for the pill below the hero: "not installed" always
   // wins (nothing else matters until that's fixed), then a start attempt in
-  // flight, then the last start failure. Empty hides the pill entirely.
+  // flight, then an unreachable-while-running host, then the last error.
+  // Empty hides the pill entirely.
   readonly property string statusMessage: {
     if (!root.installed) return "Waynergy isn't installed or not on PATH."
     if (root.startPending) return "Starting…"
+    if (root.running && root.reachable === false) return "Running, but " + root.hostDisplay + " isn't responding."
     return root.lastError
   }
   readonly property bool statusIsError: root.statusMessage !== "" && !root.startPending
@@ -97,7 +112,7 @@ Panel {
   }
 
   onOpenedChanged: if (root.opened) {
-    root.ipDraft = root.ip
+    root.ipDraft = root.hostDisplay
     root.ipError = ""
     root.cursorActive = false
     root.focusSection = "power"
@@ -119,6 +134,17 @@ Panel {
     whichProc.running = true
   }
 
+  // TCP reachability probe — the actual gap `running` alone can't cover:
+  // the local process can stay alive while the other side has dropped off
+  // the network. `root.ip`/`root.port` are already validated (digits/dots,
+  // 1-65535) by the time this runs, so interpolating them into the bash
+  // command below carries no injection risk.
+  function checkReachable() {
+    if (reachProc.running) return
+    reachProc.command = ["bash", "-c", "timeout 2 bash -c 'echo > /dev/tcp/" + root.ip + "/" + root.port + "' 2>/dev/null"]
+    reachProc.running = true
+  }
+
   function startWaynergy() {
     if (root.running) return
     if (!root.installed) {
@@ -138,6 +164,7 @@ Panel {
     root.lastError = ""
     root.running = false
     root.runningSinceMs = 0
+    root.reachable = null
     stopProc.running = true
   }
 
@@ -151,7 +178,12 @@ Panel {
     Quickshell.execDetached(["bash", "-c", "printf %s " + Util.shellQuote(value) + " | wl-copy"])
   }
 
-  // ---- IP settings. Stored locally, never touches shell.json.
+  function notify(title, body) {
+    Quickshell.execDetached(["omarchy-notification-send", title, body, "--app-name", "Waynergy", "-u", "critical"])
+  }
+
+  // ---- Host settings. Stored locally, never touches shell.json. Accepts
+  //      "ip" or "ip:port" — port defaults to 24800 when omitted.
   function isValidIp(value) {
     var m = String(value || "").trim().match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
     if (!m) return false
@@ -159,17 +191,35 @@ Panel {
     return true
   }
 
+  function isValidPort(value) {
+    var n = Number(value)
+    return isFinite(n) && n === Math.floor(n) && n >= 1 && n <= 65535
+  }
+
+  // Parses "ip" or "ip:port" into { ip, port, valid }. No colon means the
+  // whole string is the IP and port falls back to the default.
+  function parseHostPort(value) {
+    var raw = String(value || "").trim()
+    var colonIndex = raw.lastIndexOf(":")
+    if (colonIndex === -1) return { ip: raw, port: root.defaultPort, valid: isValidIp(raw) }
+    var ipPart = raw.substring(0, colonIndex)
+    var portPart = raw.substring(colonIndex + 1)
+    var portValid = /^\d+$/.test(portPart) && isValidPort(portPart)
+    return { ip: ipPart, port: portValid ? Number(portPart) : 0, valid: isValidIp(ipPart) && portValid }
+  }
+
   function saveIp() {
-    var value = String(root.ipDraft || "").trim()
-    if (!isValidIp(value)) {
-      root.ipError = "Enter a valid IPv4 address, e.g. 192.168.1.5."
+    var parsed = parseHostPort(root.ipDraft)
+    if (!parsed.valid) {
+      root.ipError = "Enter a valid IPv4 address, optionally with :port — e.g. 192.168.1.5 or 192.168.1.5:9999."
       return
     }
-    root.ip = value
-    root.ipDraft = value
+    root.ip = parsed.ip
+    root.port = parsed.port
+    root.ipDraft = root.hostDisplay
     root.ipError = ""
     root.lastError = ""
-    rememberIp(value)
+    rememberIp(root.hostDisplay)
     persistSettings()
   }
 
@@ -187,12 +237,14 @@ Panel {
   // Switching a known host updates the target for the *next* start — an
   // already-running session is left alone rather than silently restarted.
   function switchToIp(value) {
-    if (!isValidIp(value)) return
-    root.ip = value
-    root.ipDraft = value
+    var parsed = parseHostPort(value)
+    if (!parsed.valid) return
+    root.ip = parsed.ip
+    root.port = parsed.port
+    root.ipDraft = root.hostDisplay
     root.ipError = ""
     root.lastError = ""
-    rememberIp(value)
+    rememberIp(root.hostDisplay)
     persistSettings()
   }
 
@@ -214,23 +266,24 @@ Panel {
     var parsed = {}
     try { parsed = JSON.parse(text || "{}") } catch (e) { parsed = {} }
     if (typeof parsed.ip === "string" && isValidIp(parsed.ip)) root.ip = String(parsed.ip).trim()
+    if (typeof parsed.port === "number" && isValidPort(parsed.port)) root.port = Math.round(parsed.port)
     if (typeof parsed.showLabel === "boolean") root.showLabel = parsed.showLabel
     if (typeof parsed.keybind === "string") root.keybindCombo = parsed.keybind
     if (Array.isArray(parsed.recentIps)) {
       var loaded = []
       for (var i = 0; i < parsed.recentIps.length && loaded.length < 5; i++) {
         var candidate = String(parsed.recentIps[i] || "").trim()
-        if (isValidIp(candidate) && loaded.indexOf(candidate) === -1) loaded.push(candidate)
+        if (parseHostPort(candidate).valid && loaded.indexOf(candidate) === -1) loaded.push(candidate)
       }
       root.recentIps = loaded
     }
-    root.ipDraft = root.ip
+    root.ipDraft = root.hostDisplay
     root.settingsLoaded = true
     refreshStatus()
   }
 
   function persistSettings() {
-    settingsFile.setText(JSON.stringify({ ip: root.ip, showLabel: root.showLabel, keybind: root.keybindCombo, recentIps: root.recentIps }, null, 2) + "\n")
+    settingsFile.setText(JSON.stringify({ ip: root.ip, port: root.port, showLabel: root.showLabel, keybind: root.keybindCombo, recentIps: root.recentIps }, null, 2) + "\n")
   }
 
   // ---- Keyboard shortcut recording. Mirrors a stripped-down Hyprland key
@@ -387,16 +440,38 @@ Panel {
     command: ["pgrep", "-x", "waynergy"]
     onExited: function(exitCode) {
       var isRunning = exitCode === 0
+      var wasRunning = root.running
       if (!isRunning && root.startPending) {
-        root.lastError = "Waynergy exited right after starting — check the IP (" + root.ip + ") and that the host is reachable."
+        root.lastError = "Waynergy exited right after starting — check the IP (" + root.hostDisplay + ") and that the host is reachable."
       } else if (isRunning) {
         root.lastError = ""
         if (root.runningSinceMs === 0) root.runningSinceMs = Date.now()
+        root.checkReachable()
       } else {
         root.runningSinceMs = 0
+        root.reachable = null
+        // Discovered by a routine poll, not a stop we asked for ourselves
+        // (stopWaynergy() already flips `running` false synchronously, so
+        // wasRunning only reads true here when nothing touched it — the
+        // actual "it just died" case).
+        if (wasRunning && !root.startPending) {
+          root.lastError = "Waynergy stopped unexpectedly — it was running a moment ago."
+          root.notify("Waynergy stopped", "Lost connection to " + root.hostDisplay + ".")
+        }
       }
       root.startPending = false
       root.running = isRunning
+    }
+  }
+
+  Process {
+    id: reachProc
+    onExited: function(exitCode) {
+      var wasReachable = root.reachable
+      root.reachable = exitCode === 0
+      if (!root.reachable && wasReachable !== false) {
+        root.notify("Waynergy unreachable", "Running, but " + root.hostDisplay + " isn't responding.")
+      }
     }
   }
 
@@ -585,15 +660,24 @@ Panel {
 
               DetailLabel { text: "Host" }
               DetailValue {
-                text: root.ip
+                text: root.hostDisplay
                 copyable: true
-                tooltipText: "Copy host IP"
+                tooltipText: "Copy host"
               }
               DetailLabel { text: "Port" }
               DetailValue { text: String(root.port) }
 
               DetailLabel { text: "Uptime" }
               DetailValue { text: root.uptimeText }
+            }
+
+            Text {
+              width: parent.width
+              text: "IP of the PC running the waynergy/Synergy server. Add :port to override the default (" + root.defaultPort + ")."
+              wrapMode: Text.WordWrap
+              color: Qt.darker(root.contentForeground, 1.3)
+              font.family: root.contentFontFamily
+              font.pixelSize: Style.font.bodySmall
             }
 
             RowLayout {
@@ -605,7 +689,7 @@ Panel {
                 Layout.fillWidth: true
                 activeFocusOnTab: false
                 hasCursor: root.cursorActive && root.focusSection === "ip" && !ipField.activeFocus
-                placeholderText: "192.168.1.5"
+                placeholderText: "192.168.1.5 or 192.168.1.5:9999"
                 text: root.ipDraft
                 onTextChanged: { root.ipDraft = text; root.ipError = "" }
                 onAccepted: root.saveIp()
@@ -623,7 +707,7 @@ Panel {
                 tooltipText: "Save"
                 foreground: root.contentForeground
                 hasCursor: root.cursorActive && root.focusSection === "save"
-                enabled: root.ipDraft.trim() !== "" && root.ipDraft.trim() !== root.ip
+                enabled: root.ipDraft.trim() !== "" && root.ipDraft.trim() !== root.hostDisplay
                 Layout.alignment: Qt.AlignVCenter
                 onClicked: root.saveIp()
               }
@@ -834,7 +918,7 @@ Panel {
     id: hostRow
     property string hostIp: ""
     property int rowIndex: 0
-    readonly property bool active: hostRow.hostIp === root.ip
+    readonly property bool active: hostRow.hostIp === root.hostDisplay
 
     hasCursor: root.cursorActive && root.focusSection === ("knownIp" + hostRow.rowIndex)
     current: hostRow.active

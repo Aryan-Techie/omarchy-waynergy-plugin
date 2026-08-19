@@ -30,14 +30,26 @@ can agree on the approach before you put time into it.
   pattern** (`$OMARCHY_PATH/shell/plugins/panels/tailscale/Service.qml`) — same idiom on
   purpose, so it stays predictable for anyone who's already read that file.
 - **Settings persist to `~/.local/state/omarchy/io.github.aryan-techie.waynergy/settings.json`**
-  — just `{ ip, showLabel }`, nothing sensitive, so no `chmod 600` step (unlike a plugin
-  storing a token). Don't add anything else that writes files outside this without calling
-  it out clearly in the README.
+  — `{ ip, port, showLabel, keybind, recentIps }`, nothing sensitive, so no `chmod 600` step
+  (unlike a plugin storing a token). Don't add anything else that writes files outside this
+  without calling it out clearly in the README.
 - **The panel's visual idiom borrows directly from the built-in Wi-Fi panel**
   (`$OMARCHY_PATH/shell/plugins/panels/network/Panel.qml`): the status pill for
   connecting/failed states, the Host/Port detail grid, and the inline checkmark save
   button all mirror that file's own components. Keep new UI consistent with that idiom
   rather than inventing a new one.
+- **`running` (process alive) and `reachable` (TCP probe succeeded) are deliberately
+  separate properties.** Don't collapse them into one — the entire point of `reachable` is
+  catching the case where the process is alive but the connection isn't, which `running`
+  alone can never see.
+- **Host/port validation happens once, in `parseHostPort()`.** Every other function that
+  needs a host or port (start, the reachability probe, Known Hosts) goes through it or
+  trusts `root.ip`/`root.port` after it's already run — don't re-validate or re-parse
+  ad hoc elsewhere.
+- **Notifications (`notify()`, wrapping `omarchy-notification-send`) fire once per
+  transition, not once per poll.** If you add a new notification, gate it the same way
+  the existing two are (compare against the previous state, not just the current one) or
+  it'll spam on every 5-second poll while the bad state persists.
 
 ## Making a change
 
@@ -48,8 +60,11 @@ can agree on the approach before you put time into it.
 3. Copy your checkout to `~/.config/omarchy/plugins/io.github.aryan-techie.waynergy/` for
    live testing (`omarchy plugin validate` rejects symlinked plugin folders, so copy rather
    than symlink).
-4. Saved changes under `~/.config/omarchy/plugins/` hot-reload automatically; force one
-   with `omarchy-shell shell rescanPlugins` if it doesn't pick up.
+4. Saved changes under `~/.config/omarchy/plugins/` are *supposed* to hot-reload via
+   `omarchy-shell shell rescanPlugins` — but Quickshell's own compiled-QML disk cache
+   (`~/.cache/quickshell/qmlcache`) can serve a stale version even after a plugin reload
+   logs successfully. If a change isn't showing up, don't trust the rescan: `rm -rf
+   ~/.cache/quickshell/qmlcache && omarchy restart shell` for a real, verified-clean load.
 5. Check `qs log -p "$OMARCHY_PATH/shell" --tail 100` for new warnings or errors.
 6. Test against a real waynergy setup — a clean log only proves it loaded, not that
    start/stop/IP-change actually works.

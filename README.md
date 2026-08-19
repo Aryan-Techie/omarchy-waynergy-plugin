@@ -14,9 +14,11 @@
 
 Right-click the bar pill to start waynergy; right-click again to kill it.
 Left-click opens a small panel with the status, a power toggle, connection
-details, a field to change the host IP, and a switch to hide the "Waynergy"
-text next to the dot — handy when the other PC's IP changes and you don't
-want to touch a terminal.
+details, a field to change the host (and port, if it's non-default), and a
+switch to hide the "Waynergy" text next to the dot — handy when the other
+PC's IP changes and you don't want to touch a terminal. It also actually
+checks the connection is alive, not just that the process is running, and
+tells you when either one drops.
 
 ## Contents
 
@@ -53,32 +55,39 @@ this plugin has nothing to connect to — it's the client-side control only.
 
 - Bar pill shows a filled dot (`●`) when running, a hollow one (`○`) when
   stopped, next to an optional "Waynergy" label — polled every 5s so it
-  stays accurate even if waynergy exits on its own (e.g. the host became
-  unreachable).
-- **Right click** — toggle: starts `waynergy -c <ip> -p 24800 -E` if it's
+  stays accurate even if waynergy exits on its own.
+- **Right click** — toggle: starts `waynergy -c <host> -p <port> -E` if it's
   not running, kills it (`pkill -x waynergy`) if it is. No panel opens.
 - **Left click** — opens a panel with:
   - A power toggle in the header, next to the status line.
   - A status pill that actually tells you what's wrong instead of staying
-    silent: "Waynergy isn't installed or not on `PATH`." if it can't find
-    the binary, or "Waynergy exited right after starting — check the IP
-    and that the host is reachable." if a start attempt dies immediately.
-  - A connection-details grid (Host, Port, live Uptime) — click the host IP
-    to copy it.
-  - A text field to change the host IP, saved with the checkmark button
-    next to it.
-  - **Known Hosts** — your last 5 saved IPs as one-click rows, so switching
-    between two PCs doesn't mean retyping an address. Tap one to make it
-    the active target (an already-running session keeps running against
-    the old one until you restart it); forget one with the small ✕.
+    silent: not installed, a start attempt that died immediately, the
+    process running but the host not answering, or it stopping on its own
+    after running fine for a while.
+  - A connection-details grid (Host, Port, live Uptime) — click the host to
+    copy it.
+  - A **real reachability check**, not just "is the process alive" — a TCP
+    probe to host:port every poll while running, so a dropped connection
+    shows up even though `waynergy` itself is still sitting there running.
+  - A text field to change the host, saved with the checkmark button next
+    to it. Accepts a bare IP (port stays the default `24800`) or `ip:port`
+    to target something else.
+  - **Known Hosts** — your last 5 saved host:port targets as one-click rows,
+    so switching between two PCs doesn't mean retyping anything. Tap one to
+    make it active (an already-running session keeps running against the
+    old target until you restart it); forget one with the small ✕.
   - A switch to show/hide the "Waynergy" label in the bar (leaves just the
     dot).
   - A keyboard shortcut recorder — set once, works from anywhere.
 - **Middle click** — force a status refresh.
+- **Desktop notifications** when waynergy stops on its own after running
+  fine, or when it's running but the host stops answering — you don't have
+  to be looking at the bar to find out.
 - **Optional global keyboard shortcut** (`Ctrl+Super+Y` by default, or record
   your own) to open the panel without touching the mouse.
 - **Fully keyboard-navigable panel** — Up/Down between every control, Space
-  or Enter to activate whatever's highlighted, Escape to back out.
+  or Enter to activate whatever's highlighted, Escape to back out, **R** to
+  refresh and **S** to toggle from anywhere.
 - No config file editing required — settings live in a small local JSON
   file, edited entirely from the panel.
 
@@ -96,10 +105,12 @@ this plugin has nothing to connect to — it's the client-side control only.
   `/usr/bin` instead. The panel's status pill will tell you plainly if
   waynergy can't be found at all.
 - A **waynergy/Synergy server already running on the other PC**, reachable
-  on TCP port `24800`. This plugin only drives the client side.
-- **Network reachability** between this machine and that IP/port — same
+  on TCP port `24800` by default (configurable per host — see Usage). This
+  plugin only drives the client side.
+- **Network reachability** between this machine and that host:port — same
   LAN, VPN, Tailscale, whatever gets you there. If the process dies right
-  after starting, that's usually this.
+  after starting, or the panel says it's running but the host isn't
+  responding, that's usually this.
 
 ## Install
 
@@ -122,8 +133,15 @@ run `omarchy-shell shell rescanPlugins` if it doesn't pick up right away).
 | Action | Effect |
 |---|---|
 | Right click | Start waynergy if stopped, kill it if running |
-| Left click | Open the panel (status + power toggle + connection details + IP field + Known Hosts + label switch + keyboard shortcut) |
+| Left click | Open the panel (status + power toggle + connection details + host field + Known Hosts + label switch + keyboard shortcut) |
 | Middle click | Refresh the running-state check immediately |
+
+### Setting a custom port
+
+The host field takes a bare IP (`192.168.1.5`) or `ip:port`
+(`192.168.1.5:9999`). Leave the port off and it defaults to `24800`. Known
+Hosts remembers whichever form you saved, so a non-default port round-trips
+correctly when you switch back to that entry later.
 
 ### Keyboard shortcut
 
@@ -157,35 +175,46 @@ Once the panel is open:
 
 ## How it works
 
-- **Start:** `waynergy -c <ip> -p 24800 -E`, launched detached
+- **Start:** `waynergy -c <host> -p <port> -E`, launched detached
   (`Quickshell.execDetached`) so it survives plugin reloads and isn't tied
-  to the bar widget's lifetime.
+  to the bar widget's lifetime. Port defaults to `24800`; the `-E` flag is
+  always passed.
 - **Stop:** `pkill -x waynergy` (SIGTERM, matches by process name).
-- **Status:** `pgrep -x waynergy`, polled every 5 seconds and right after
-  every start/stop.
+- **Process status:** `pgrep -x waynergy`, polled every 5 seconds and right
+  after every start/stop.
+- **Reachability:** a plain-bash TCP probe (`timeout 2 bash -c 'echo >
+  /dev/tcp/<host>/<port>'`, no `nc`/extra dependency needed) run right
+  after each poll that finds the process alive — this is what catches
+  "running, but not actually talking to anything," which process-liveness
+  alone can't.
 - **Installed check:** `which waynergy`, same pattern the built-in
   Tailscale plugin uses, checked on open and on every status poll.
+- **Notifications:** `omarchy-notification-send` (critical urgency) fires
+  once when waynergy stops on its own after running fine, and once when a
+  reachability probe first fails while it's still running — not on every
+  single failed poll after that, so it doesn't spam you.
 - **Keyboard shortcut:** a line appended to `~/.config/hypr/bindings.lua`
   calling `omarchy-shell shell toggle io.github.aryan-techie.waynergy`,
   applied via a backup-first, auto-rollback-on-error script (same mechanism
   the todoist plugin uses for its own shortcut).
-- Port is fixed at `24800` and the `-E` flag is always passed, matching
-  the command this plugin was built around. Only the IP is configurable.
 
 ## State files
 
-The host IP, label-visibility setting, keyboard shortcut, and the last 5
-saved IPs (Known Hosts) are stored at:
+The host IP, port, label-visibility setting, keyboard shortcut, and the
+last 5 saved Known Hosts entries are stored at:
 
 ```
 ~/.local/state/omarchy/io.github.aryan-techie.waynergy/settings.json
 ```
 
-It's `{ "ip": "...", "showLabel": true, "keybind": "...", "recentIps": [...] }`
+It's `{ "ip": "...", "port": 24800, "showLabel": true, "keybind": "...", "recentIps": [...] }`
 — nothing else is written anywhere on disk except the one
-`~/.config/hypr/bindings.lua` line described above, and nothing is sent
-over the network by this plugin itself (the IP is only ever handed to
-`waynergy` as a `-c` argument, never shell-interpolated).
+`~/.config/hypr/bindings.lua` line described above. The only things this
+plugin sends anywhere are: the reachability probe (a bare TCP connect
+attempt to your own configured host:port, no data sent), and the
+`omarchy-notification-send` calls that show local desktop notifications —
+the host/port themselves are only ever handed to `waynergy` as `-c`/`-p`
+arguments, never shell-interpolated.
 
 ## Uninstalling
 
