@@ -825,7 +825,7 @@ Panel {
 
             GridLayout {
               width: parent.width
-              columns: 4
+              columns: 2
               columnSpacing: Style.space(20)
               rowSpacing: Style.spacing.labelGap
 
@@ -835,11 +835,12 @@ Panel {
                 copyable: true
                 tooltipText: "Copy host"
               }
-              DetailLabel { text: "Port" }
-              DetailValue { text: String(root.port) }
 
               DetailLabel { text: "Uptime" }
               DetailValue { text: root.uptimeText }
+
+              DetailLabel { text: "Port" }
+              DetailValue { text: String(root.port) }
             }
 
             Text {
