@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="assets/waynergy-icon.png" width="72" height="72" alt="">
+
 # Waynergy for Omarchy
 
 **A one-click [waynergy](https://github.com/r-c-f/waynergy) start/stop bar widget for [Omarchy](https://omarchy.org/).**
@@ -10,7 +12,11 @@
 [![Validate](https://github.com/Aryan-Techie/omarchy-waynergy-plugin/actions/workflows/validate.yml/badge.svg)](https://github.com/Aryan-Techie/omarchy-waynergy-plugin/actions/workflows/validate.yml)
 [![Contributions welcome](https://img.shields.io/badge/contributions-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
+*Part of the [AROICE](https://aroice.in) family of tools.*
+
 </div>
+
+![Waynergy panel preview](preview.png)
 
 Right-click the bar pill to start waynergy; right-click again to kill it.
 Left-click opens a small panel with the status, a power toggle, connection
@@ -282,4 +288,19 @@ MIT — see [LICENSE](LICENSE).
 
 ## Author
 
-[aryan-techie](https://github.com/aryan-techie)
+**Aryan Techie** ([Aryan Jangra](https://aryan.aroice.in))
+
+- 🌐 Website: [aryan.aroice.in](https://aryan.aroice.in)
+- 📧 Email: [aryan@aroice.in](mailto:aryan@aroice.in)
+- 🐙 GitHub: [@Aryan-Techie](https://github.com/Aryan-Techie)
+- 🏢 Organization: [AROICE](https://aroice.in)
+
+---
+
+<div align="center">
+
+**Made with ❤️ by [AROICE](https://github.com/AROICE-HQ)**
+
+*Clear tools for a clear mind.*
+
+</div>
