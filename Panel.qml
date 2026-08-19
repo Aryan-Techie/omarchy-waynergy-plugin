@@ -1142,6 +1142,7 @@ Panel {
               Button {
                 id: keybindDefaultButton
                 text: "Ctrl+Super+Y"
+                bordered: true
                 foreground: root.contentForeground
                 hasCursor: root.cursorActive && root.focusSection === "keybindDefault"
                 selected: root.keybindCombo === "CTRL + SUPER + Y"
@@ -1152,6 +1153,7 @@ Panel {
               Button {
                 id: keybindRecordButton
                 text: "Record custom…"
+                bordered: true
                 foreground: root.contentForeground
                 hasCursor: root.cursorActive && root.focusSection === "keybindRecord"
                 enabled: root.keybindApplyStatus !== "applying"
@@ -1161,6 +1163,7 @@ Panel {
               Button {
                 id: keybindRemoveButton
                 text: "Remove"
+                bordered: true
                 foreground: root.contentForeground
                 hasCursor: root.cursorActive && root.focusSection === "keybindRemove"
                 visible: root.keybindCombo !== ""
@@ -1213,6 +1216,7 @@ Panel {
 
                 Button {
                   text: "Apply"
+                  bordered: true
                   foreground: root.contentForeground
                   enabled: root.pendingKeybindCombo !== "" && root.keybindApplyStatus !== "applying"
                   onClicked: root.applyKeybindCombo(root.pendingKeybindCombo)
@@ -1220,6 +1224,7 @@ Panel {
 
                 Button {
                   text: "Cancel"
+                  bordered: true
                   foreground: root.contentForeground
                   onClicked: root.cancelRecordingKeybind()
                 }
