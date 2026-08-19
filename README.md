@@ -14,6 +14,8 @@
 
 *Part of the [AROICE](https://aroice.in) family of tools.*
 
+[Features](#features) • [Install](#install) • [Usage](#usage) • [Contributing](#contributing) • [Case Study](https://www.aryantechie.com/work/omarchy-waynergy-plugin)
+
 </div>
 
 ![Waynergy — your keyboard & mouse, one click away in Omarchy's top bar](assets/hero-banner.png)
