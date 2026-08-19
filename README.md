@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/waynergy-icon.png" width="72" height="72" alt="">
+<img src="assets/waynergy-icon.png" width="108" height="72" alt="">
 
 # Waynergy for Omarchy
 
