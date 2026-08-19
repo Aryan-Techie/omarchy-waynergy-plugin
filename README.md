@@ -179,13 +179,19 @@ Once the panel is open:
 
 ## How it works
 
-- **Start:** `waynergy -c <host> -p <port> -E`, launched detached
-  (`Quickshell.execDetached`) so it survives plugin reloads and isn't tied
-  to the bar widget's lifetime. Port defaults to `24800`; the `-E` flag is
-  always passed.
-- **Stop:** `pkill -x waynergy` (SIGTERM, matches by process name).
-- **Process status:** `pgrep -x waynergy`, polled every 5 seconds and right
-  after every start/stop.
+- **Start:** `waynergy -c <host> -p <port> -E`, launched through a detached
+  bash wrapper (not a tracked process, so it survives plugin reloads and
+  isn't tied to the bar widget's lifetime) that backgrounds it and records
+  its real PID to `<state dir>/waynergy.pid`. Port defaults to `24800`; the
+  `-E` flag is always passed.
+- **Stop/status target that specific PID**, not just "whatever's named
+  waynergy" — each check confirms `/proc/<pid>/comm` is still literally
+  `waynergy` before trusting it, so a stale or unrelated process can't
+  eat a signal meant for the instance this plugin actually started. Falls
+  back to `pgrep -x waynergy` / `pkill -x waynergy` only right after a
+  plugin/shell reload, when the tracked PID hasn't been read back yet —
+  and self-heals to a precise PID again on the next poll if that fallback
+  finds exactly one match.
 - **Reachability:** a plain-bash TCP probe (`timeout 2 bash -c 'echo >
   /dev/tcp/<host>/<port>'`, no `nc`/extra dependency needed) run right
   after each poll that finds the process alive — this is what catches
@@ -193,10 +199,21 @@ Once the panel is open:
   alone can't.
 - **Installed check:** `which waynergy`, same pattern the built-in
   Tailscale plugin uses, checked on open and on every status poll.
+- **Auto-recovery on disconnect:** if the reachability probe fails and
+  stays failed for 5 seconds (not acted on immediately — a single blip
+  isn't worth it), the plugin stops and restarts waynergy itself, up to 3
+  attempts per outage. This is also what clears a **stuck key** — if the
+  connection drops mid-keypress, the last key can stay "held" until
+  something closes waynergy's virtual input device, which a clean
+  stop+restart does (the same reason touching your desktop's own physical
+  mouse/keyboard clears it: a fresh input event supersedes the stuck one).
+  Not a guaranteed fix — this plugin can't see waynergy's internals — but
+  it's the most direct lever available from outside the process.
 - **Notifications:** `omarchy-notification-send` (critical urgency) fires
-  once when waynergy stops on its own after running fine, and once when a
-  reachability probe first fails while it's still running — not on every
-  single failed poll after that, so it doesn't spam you.
+  when waynergy stops on its own after running fine, when a reachability
+  probe first fails while it's still running, and when an auto-recovery
+  restart actually runs — not repeated on every poll after the first, so
+  it doesn't spam you.
 - **Keyboard shortcut:** a line appended to `~/.config/hypr/bindings.lua`
   calling `omarchy-shell shell toggle io.github.aryan-techie.waynergy`,
   applied via a backup-first, auto-rollback-on-error script (same mechanism
@@ -211,8 +228,11 @@ last 5 saved Known Hosts entries are stored at:
 ~/.local/state/omarchy/io.github.aryan-techie.waynergy/settings.json
 ```
 
-It's `{ "ip": "...", "port": 24800, "showLabel": true, "keybind": "...", "recentIps": [...] }`
-— nothing else is written anywhere on disk except the one
+It's `{ "ip": "...", "port": 24800, "showLabel": true, "keybind": "...", "recentIps": [...] }`.
+The only other file this plugin writes is
+`~/.local/state/omarchy/io.github.aryan-techie.waynergy/waynergy.pid` — the PID of
+whichever waynergy instance is currently running, written right after start and used to
+target stop/status precisely (see How it works) — plus the one
 `~/.config/hypr/bindings.lua` line described above. The only things this
 plugin sends anywhere are: the reachability probe (a bare TCP connect
 attempt to your own configured host:port, no data sent), and the

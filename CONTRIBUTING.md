@@ -13,19 +13,32 @@ can agree on the approach before you put time into it.
 - `BarWidget.qml` — the bar pill. Thin: reads state back from `Panel.qml`, decides what the
   pill shows, and routes clicks (right-click toggles start/stop directly, left-click opens
   the panel).
-- `Panel.qml` — everything else: process control (start/stop/status via `waynergy`/
-  `pkill`/`pgrep`/`which` `Process`es), settings persistence, and the panel UI, all in one
-  file. There's no `Model.js` — nothing here is complex enough to warrant a separate data
-  model.
+- `Panel.qml` — everything else: process control (start via a detached PID-capturing
+  wrapper, stop/status via PID-targeted `Process`es with a `pkill`/`pgrep`-by-name
+  fallback, `which` for the installed check), settings persistence, and the panel UI, all
+  in one file. There's no `Model.js` — nothing here is complex enough to warrant a separate
+  data model.
 
 ## Conventions worth knowing before you dig in
 
 - **Start is detached, not tracked.** `startWaynergy()` uses `Quickshell.execDetached`, not
   a tracked `Process` object, specifically so a running waynergy session survives a plugin
-  reload or shell restart. The tradeoff: we can't capture its stderr or exact exit reason —
-  status is inferred from polling `pgrep -x waynergy` instead. Keep this in mind before
-  "fixing" it to use a tracked `Process` — that would reintroduce the exact problem it was
-  written to avoid.
+  reload or shell restart. The tradeoff: we can't capture its stderr or exact exit reason.
+  Keep this in mind before "fixing" it to use a tracked `Process` — that would reintroduce
+  the exact problem it was written to avoid.
+- **Stop/status target a PID, not a process name, whenever one is known.** `execDetached`
+  itself doesn't return a PID, so `startWaynergy()` launches through a small bash wrapper
+  that backgrounds waynergy, captures `$!`, and writes it to `<stateDir>/waynergy.pid`
+  before exiting (the backgrounded child is orphaned normally when the wrapper exits, same
+  as any background job — it doesn't get killed). `root.trackedPid` is read back from that
+  file and, from then on, `/proc/<pid>/comm` is checked before trusting or signaling it —
+  confirms the PID is both alive *and* still actually `waynergy`, closing the PID-reuse
+  race a bare `kill -0` can't. Falls back to `pgrep -x waynergy` / `pkill -x waynergy`
+  **only** when `trackedPid` is `0` (right after a reload, before it's been read back) —
+  don't go back to matching by name as the primary path, that's the exact bug this fixed
+  (a stale/blocked instance eating a signal meant for the one actually started here). The
+  fallback path self-heals: if it finds exactly one match, it adopts that PID so later
+  checks go back to being precise.
 - **The `which waynergy` installed-check mirrors the built-in Tailscale plugin's own
   pattern** (`$OMARCHY_PATH/shell/plugins/panels/tailscale/Service.qml`) — same idiom on
   purpose, so it stays predictable for anyone who's already read that file.

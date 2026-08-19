@@ -6,16 +6,19 @@ import Quickshell.Io
 import qs.Commons
 import qs.Ui
 
-// Owns waynergy's run state (polled via pgrep), whether the waynergy binary
-// is even on PATH (checked via `which`, same pattern the built-in Tailscale
-// plugin uses), the persisted host IP / label-visibility / keybind settings,
-// and keyboard-cursor navigation between the panel's controls. The bar
-// widget's right click calls toggleWaynergy() directly — no panel needed for
-// that. Left click (or the global shortcut below) opens this panel: status,
-// a power toggle, connection details, the IP field, a label-visibility
-// switch, and a keyboard-shortcut recorder. Visual idiom (hero + status pill
-// + detail grid + inline confirm button) matches the built-in Wi-Fi panel;
-// the keyboard-shortcut recorder matches the one in the todoist plugin.
+// Owns waynergy's run state — polled against the specific PID this plugin
+// launched when known, `pgrep -x waynergy` as a fallback right after a
+// reload — whether the waynergy binary is even on PATH (checked via
+// `which`, same pattern the built-in Tailscale plugin uses), the persisted
+// host IP / label-visibility / keybind settings, and keyboard-cursor
+// navigation between the panel's controls. The bar widget's right click
+// calls toggleWaynergy() directly — no panel needed for that. Left click
+// (or the global shortcut below) opens this panel: status, a power toggle,
+// connection details, the IP field, a label-visibility switch, and a
+// keyboard-shortcut recorder. Visual idiom (hero + status pill + detail
+// grid + inline confirm button, rotating hero status phrases) matches the
+// built-in Wi-Fi/Bluetooth panels; the keyboard-shortcut recorder matches
+// the one in the todoist plugin.
 Panel {
   id: root
   moduleName: "io.github.aryan-techie.waynergy"
@@ -30,6 +33,17 @@ Panel {
   readonly property string pluginDir: homeDir + "/.config/omarchy/plugins/io.github.aryan-techie.waynergy"
   readonly property string stateDir: homeDir + "/.local/state/omarchy/io.github.aryan-techie.waynergy"
   readonly property string settingsPath: stateDir + "/settings.json"
+  readonly property string pidPath: stateDir + "/waynergy.pid"
+
+  // The PID of the specific waynergy instance this plugin started, so
+  // stop/status target that process instead of "whatever's named
+  // waynergy" — see startWaynergy()/pidCommentCheck(). Not persisted: a
+  // stale PID surviving a reboot could get reused by an unrelated
+  // process, which would be actively dangerous to act on. Resets to 0 on
+  // stop and after every plugin/shell reload; self-heals back to a real
+  // value on the next status poll if exactly one waynergy process is
+  // found (see statusProc.onExited).
+  property int trackedPid: 0
 
   readonly property int defaultPort: 24800
   property string ip: "192.168.1.5"
@@ -51,6 +65,13 @@ Panel {
   // that was missing before: a live process can still be talking to
   // nothing if the other side dropped off the network.
   property var reachable: null
+  // Auto-recovery attempts made for the *current* unreachable episode —
+  // capped so a genuinely dead host doesn't get restarted forever. Reset
+  // on a real recovery (see reachProc) and on any manually-triggered
+  // start (see toggleWaynergy()), but deliberately NOT inside
+  // stopWaynergy()/startWaynergy() themselves, since recoveryTimer calls
+  // those directly as part of counting an attempt.
+  property int recoveryAttempts: 0
 
   // Optimistic true until the first `which waynergy` check lands, so the
   // panel doesn't flash "not installed" for the split second before that
@@ -144,11 +165,16 @@ Panel {
 
   // ---- Process control. Start is fire-and-forget via execDetached (not
   //      tied to this Panel's own lifetime, so reloading the plugin never
-  //      kills a running session); stop/status go through pkill/pgrep on
-  //      the process name since we don't track a PID across plugin reloads.
+  //      kills a running session). Stop/status target the specific PID
+  //      this plugin launched when known (see startWaynergy()), falling
+  //      back to matching by process name only when it isn't — right
+  //      after a plugin/shell reload, where in-memory state is lost.
   function refreshStatus() {
     checkInstalled()
     if (statusProc.running) return
+    statusProc.command = root.trackedPid > 0
+      ? ["bash", "-c", root.pidCommentCheck(root.trackedPid)]
+      : ["pgrep", "-x", "waynergy"]
     statusProc.running = true
   }
 
@@ -168,6 +194,15 @@ Panel {
     reachProc.running = true
   }
 
+  // `[ "$(cat /proc/<pid>/comm)" = waynergy ]` — true only when that PID
+  // is both alive *and* still actually waynergy, closing the PID-reuse
+  // race a bare `kill -0`/by-name match can't: if the process this
+  // plugin started already exited and the PID got recycled by something
+  // else entirely, this correctly reports "not ours" instead of "alive".
+  function pidCommentCheck(pid) {
+    return "[ \"$(cat /proc/" + pid + "/comm 2>/dev/null)\" = waynergy ]"
+  }
+
   function startWaynergy() {
     if (root.running) return
     if (!root.installed) {
@@ -176,10 +211,23 @@ Panel {
     }
     root.lastError = ""
     root.startPending = true
-    Quickshell.execDetached(["waynergy", "-c", root.ip, "-p", String(root.port), "-E"])
+    root.trackedPid = 0
+    // Launched through a detached wrapper (not a tracked Process, which
+    // Quickshell would kill on plugin/shell reload) that backgrounds
+    // waynergy, records its real PID via `$!`, then exits — the
+    // backgrounded child is orphaned and reparented normally when the
+    // wrapper exits, same as any ordinary background job, so it keeps
+    // running exactly like the old direct execDetached call did.
+    Quickshell.execDetached(["bash", "-c",
+      "waynergy -c " + Util.shellQuote(root.ip) + " -p " + root.port + " -E >/dev/null 2>&1 & echo $! > " + Util.shellQuote(root.pidPath) + "; disown"])
     root.running = true
     root.runningSinceMs = Date.now()
     startCheckTimer.restart()
+  }
+
+  function readTrackedPid() {
+    if (pidReadProc.running) return
+    pidReadProc.running = true
   }
 
   function stopWaynergy() {
@@ -188,12 +236,22 @@ Panel {
     root.running = false
     root.runningSinceMs = 0
     root.reachable = null
+    if (root.trackedPid > 0) {
+      stopProc.command = ["bash", "-c", root.pidCommentCheck(root.trackedPid) + " && kill -TERM " + root.trackedPid]
+    } else {
+      stopProc.command = ["pkill", "-x", "waynergy"]
+    }
+    root.trackedPid = 0
     stopProc.running = true
   }
 
   function toggleWaynergy() {
-    if (root.running) root.stopWaynergy()
-    else root.startWaynergy()
+    if (root.running) {
+      root.stopWaynergy()
+    } else {
+      root.recoveryAttempts = 0
+      root.startWaynergy()
+    }
   }
 
   function copyToClipboard(value) {
@@ -460,10 +518,24 @@ Panel {
 
   Process {
     id: statusProc
-    command: ["pgrep", "-x", "waynergy"]
+    stdout: StdioCollector {
+      id: statusOut
+      waitForEnd: true
+    }
     onExited: function(exitCode) {
       var isRunning = exitCode === 0
       var wasRunning = root.running
+      // Self-heal after a reload: if we weren't tracking a PID (so this
+      // check ran the `pgrep -x` fallback) and it found exactly one
+      // match, adopt it — stop/status become PID-precise again from
+      // here on. More than one match stays deliberately ambiguous.
+      if (root.trackedPid === 0 && isRunning) {
+        var lines = String(statusOut.text || "").trim().split("\n").filter(function(l) { return l !== "" })
+        if (lines.length === 1) {
+          var found = parseInt(lines[0], 10)
+          if (!isNaN(found) && found > 0) root.trackedPid = found
+        }
+      }
       if (!isRunning && root.startPending) {
         root.lastError = "Waynergy exited right after starting — check the IP (" + root.hostDisplay + ") and that the host is reachable."
       } else if (isRunning) {
@@ -473,6 +545,7 @@ Panel {
       } else {
         root.runningSinceMs = 0
         root.reachable = null
+        root.trackedPid = 0
         // Discovered by a routine poll, not a stop we asked for ourselves
         // (stopWaynergy() already flips `running` false synchronously, so
         // wasRunning only reads true here when nothing touched it — the
@@ -488,19 +561,35 @@ Panel {
   }
 
   Process {
+    id: pidReadProc
+    command: ["cat", root.pidPath]
+    stdout: StdioCollector {
+      id: pidReadOut
+      waitForEnd: true
+      onStreamFinished: {
+        var n = parseInt(String(text || "").trim(), 10)
+        if (!isNaN(n) && n > 0) root.trackedPid = n
+      }
+    }
+  }
+
+  Process {
     id: reachProc
     onExited: function(exitCode) {
       var wasReachable = root.reachable
       root.reachable = exitCode === 0
-      if (!root.reachable && wasReachable !== false) {
+      if (root.reachable) {
+        root.recoveryAttempts = 0
+        recoveryTimer.stop()
+      } else if (wasReachable !== false) {
         root.notify("Waynergy unreachable", "Running, but " + root.hostDisplay + " isn't responding.")
+        if (root.recoveryAttempts < 3) recoveryTimer.restart()
       }
     }
   }
 
   Process {
     id: stopProc
-    command: ["pkill", "-x", "waynergy"]
     onExited: function() {
       Qt.callLater(root.refreshStatus)
     }
@@ -532,7 +621,33 @@ Panel {
     id: startCheckTimer
     interval: 800
     repeat: false
-    onTriggered: root.refreshStatus()
+    onTriggered: {
+      root.readTrackedPid()
+      root.refreshStatus()
+    }
+  }
+
+  // Debounced auto-recovery for a stuck key: waynergy's virtual input
+  // device keeps reporting whatever key was down when the connection
+  // died until something closes its file descriptor, which is what a
+  // clean stop+restart does (same reason touching the desktop's own
+  // physical mouse/keyboard clears it — a fresh input event supersedes
+  // the stuck one; this just triggers that release in software instead).
+  // Waits out a single failed probe first — a network blip isn't worth
+  // restarting over, and restarting is itself a disconnect from
+  // waynergy's side, so acting on every blip would work against the
+  // point. Cancelled by reachProc the moment reachability recovers.
+  Timer {
+    id: recoveryTimer
+    interval: 5000
+    repeat: false
+    onTriggered: {
+      if (!root.running || root.reachable !== false) return
+      root.recoveryAttempts++
+      root.notify("Waynergy reconnecting", root.hostDisplay + " stopped responding — restarting waynergy (attempt " + root.recoveryAttempts + " of 3).")
+      root.stopWaynergy()
+      Qt.callLater(root.startWaynergy)
+    }
   }
 
   Timer {
@@ -745,6 +860,8 @@ Panel {
                 Layout.fillWidth: true
                 activeFocusOnTab: false
                 hasCursor: root.cursorActive && root.focusSection === "ip" && !ipField.activeFocus
+                horizontalPadding: Style.spacing.controlPaddingX + Style.space(4)
+                verticalPadding: Style.spacing.inputPaddingY + Style.space(5)
                 placeholderText: "192.168.1.5 or 192.168.1.5:9999"
                 text: root.ipDraft
                 onTextChanged: { root.ipDraft = text; root.ipError = "" }

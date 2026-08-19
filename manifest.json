@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "io.github.aryan-techie.waynergy",
   "name": "Waynergy",
-  "version": "1.3.1",
+  "version": "1.4.0",
   "author": "aryan-techie",
   "license": "MIT",
   "description": "One-click start/stop for waynergy from the bar, a settings panel, and an optional global keyboard shortcut.",

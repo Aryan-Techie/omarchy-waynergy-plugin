@@ -2,6 +2,32 @@
 
 All notable user-facing changes to this plugin. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v1.4.0 — PID-precise process control, auto-recovery, a roomier IP field
+
+### Fixed
+
+- **Stop/status now target the specific PID this plugin started**, not just "whatever's
+  named waynergy." Previously `pkill -x waynergy` / `pgrep -x waynergy` matched by process
+  name, so a stale or blocked `waynergy` instance elsewhere on the system could eat a
+  signal meant for the one this plugin launched. `startWaynergy()` now launches through a
+  detached bash wrapper that captures the real PID (`$!`) to `<state dir>/waynergy.pid`;
+  every later check verifies `/proc/<pid>/comm` is still `waynergy` before trusting or
+  signaling it. Falls back to matching by name only right after a plugin/shell reload
+  (before the PID's been read back), and self-heals to a precise PID again as soon as that
+  fallback finds exactly one match. Verified end-to-end outside QML before shipping.
+- IP field is noticeably roomier — more padding, less cramped, less likely to feel like
+  typed text is sliding out of view.
+
+### Added
+
+- **Auto-recovery from a stuck key on disconnect.** If the reachability probe fails and
+  stays failed for 5 seconds, the plugin stops and restarts waynergy itself (up to 3
+  attempts per outage) — closing a `uinput` device's file descriptor is what makes the
+  kernel release any key it was still reporting as held, the same effect touching your
+  desktop's own physical mouse/keyboard has. A distinct notification fires when this
+  actually runs. Not a guaranteed fix (this plugin can't see waynergy's internals), but the
+  most direct lever available from outside the process.
+
 ## v1.3.1 — Rotating status phrases, bigger panel
 
 ### Changed
