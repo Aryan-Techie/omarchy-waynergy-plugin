@@ -2,6 +2,23 @@
 
 All notable user-facing changes to this plugin. Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## v1.5.0 — Auto-start on login, mute notifications, named Known Hosts
+
+### Added
+
+- **Auto-start on login** (off by default): a "Start waynergy automatically when the bar
+  starts" switch in the new PREFERENCES section. Checks that it isn't already running
+  first (a session can survive a plugin/shell reload), so it never starts a second
+  instance on top of one that's still going.
+- **Mute notifications toggle**: turns off the stopped/unreachable/reconnecting
+  notifications for anyone who finds them noisy. On by default, matching prior behavior.
+- **Named Known Hosts**: give a saved host a label via the new pencil icon (or press **N**
+  with it highlighted) so it reads "Home Mac" instead of a raw address. Existing saved
+  lists (plain host strings, from before this) upgrade automatically the first time this
+  version runs — nothing is lost.
+- New "PREFERENCES" section groups the label-visibility switch with the two new toggles,
+  replacing what used to be an unlabeled standalone row.
+
 ## v1.4.0 — PID-precise process control, auto-recovery, a roomier IP field
 
 ### Fixed

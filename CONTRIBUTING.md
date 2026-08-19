@@ -43,9 +43,18 @@ can agree on the approach before you put time into it.
   pattern** (`$OMARCHY_PATH/shell/plugins/panels/tailscale/Service.qml`) — same idiom on
   purpose, so it stays predictable for anyone who's already read that file.
 - **Settings persist to `~/.local/state/omarchy/io.github.aryan-techie.waynergy/settings.json`**
-  — `{ ip, port, showLabel, keybind, recentIps }`, nothing sensitive, so no `chmod 600` step
-  (unlike a plugin storing a token). Don't add anything else that writes files outside this
-  without calling it out clearly in the README.
+  — `{ ip, port, showLabel, keybind, autoStart, notificationsEnabled, recentIps }`, nothing
+  sensitive, so no `chmod 600` step (unlike a plugin storing a token). Don't add anything
+  else that writes files outside this without calling it out clearly in the README.
+- **`recentIps` entries are `{ host, name }` objects, not bare strings.** `loadSettingsFromText()`
+  accepts the old bare-string format too and upgrades it on load — if you touch that
+  migration, keep both shapes working, since an existing user's saved list has to survive
+  the upgrade rather than silently vanish. `rememberIp()` always preserves an existing
+  entry's `name` when re-saving that host; only a genuinely new host starts unnamed.
+- **Only one Known Hosts row can be in rename mode at a time** — enforced by a single
+  root-level `editingHost` (the host string being edited), not a per-row flag. Follow that
+  pattern for anything else that needs "exactly one of N rows is active" state; don't give
+  `KnownHostRow` its own local editing property.
 - **The panel's visual idiom borrows directly from the built-in Wi-Fi panel**
   (`$OMARCHY_PATH/shell/plugins/panels/network/Panel.qml`): the status pill for
   connecting/failed states, the Host/Port detail grid, and the inline checkmark save

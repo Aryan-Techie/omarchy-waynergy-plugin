@@ -79,14 +79,21 @@ this plugin has nothing to connect to — it's the client-side control only.
   - **Known Hosts** — your last 5 saved host:port targets as one-click rows,
     so switching between two PCs doesn't mean retyping anything. Tap one to
     make it active (an already-running session keeps running against the
-    old target until you restart it); forget one with the small ✕.
-  - A switch to show/hide the "Waynergy" label in the bar (leaves just the
-    dot).
+    old target until you restart it). Give one a name (pencil icon, or
+    press **N** with it highlighted) so it reads "Home Mac" instead of a
+    raw address; forget one with the small ✕.
+  - **Preferences**: show/hide the "Waynergy" label in the bar, start
+    waynergy automatically when the bar starts, and mute the desktop
+    notifications below if you'd rather not get them.
   - A keyboard shortcut recorder — set once, works from anywhere.
 - **Middle click** — force a status refresh.
-- **Desktop notifications** when waynergy stops on its own after running
-  fine, or when it's running but the host stops answering — you don't have
-  to be looking at the bar to find out.
+- **Desktop notifications** (can be muted from Preferences) when waynergy
+  stops on its own after running fine, or when it's running but the host
+  stops answering — you don't have to be looking at the bar to find out.
+- **Auto-start on login** (off by default) — waynergy comes back on its own
+  after a reboot, without needing to know whether a previous session
+  already survived the reload first (it checks before starting a second
+  one).
 - **Optional global keyboard shortcut** (`Ctrl+Super+Y` by default, or record
   your own) to open the panel without touching the mouse.
 - **Fully keyboard-navigable panel** — Up/Down between every control, Space
@@ -173,6 +180,7 @@ Once the panel is open:
 - **R** — refresh the running-state check immediately, from anywhere in
   the panel (doesn't need the highlight to be on anything in particular).
 - **S** — toggle waynergy on/off, same as **R** works from anywhere.
+- **N** — rename whichever Known Hosts row is currently highlighted.
 - **Escape** — while actually typing in the IP field, the first Escape just
   exits typing and returns to the highlight (doesn't close the panel); a
   second Escape (or one from anywhere else) closes the panel.
@@ -221,14 +229,17 @@ Once the panel is open:
 
 ## State files
 
-The host IP, port, label-visibility setting, keyboard shortcut, and the
-last 5 saved Known Hosts entries are stored at:
+The host IP, port, preferences (label visibility, auto-start, notifications), keyboard
+shortcut, and the last 5 saved Known Hosts entries are stored at:
 
 ```
 ~/.local/state/omarchy/io.github.aryan-techie.waynergy/settings.json
 ```
 
-It's `{ "ip": "...", "port": 24800, "showLabel": true, "keybind": "...", "recentIps": [...] }`.
+It's `{ "ip": "...", "port": 24800, "showLabel": true, "keybind": "...", "autoStart": false, "notificationsEnabled": true, "recentIps": [{ "host": "...", "name": "..." }] }`
+— each Known Hosts entry is `{host, name}`, `name` empty unless you've set one. Older saved
+lists (a plain array of host strings, from before naming existed) load and upgrade
+automatically the first time this version runs.
 The only other file this plugin writes is
 `~/.local/state/omarchy/io.github.aryan-techie.waynergy/waynergy.pid` — the PID of
 whichever waynergy instance is currently running, written right after start and used to

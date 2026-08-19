@@ -54,6 +54,21 @@ Panel {
   property bool showLabel: true
   property bool settingsLoaded: false
 
+  // Off by default. Not a systemd unit — omarchy-shell (and this plugin
+  // with it) is already started at session login, so "start once we've
+  // confirmed waynergy isn't already running" achieves the same outcome.
+  // autoStartChecked is transient (not persisted): guards this to fire
+  // exactly once per plugin lifetime, on the first status resolution
+  // after load — never on a later manual stop — and only when that
+  // check positively confirms nothing's running yet, so a session that
+  // survived a plugin/shell reload never gets a second instance started
+  // on top of it.
+  property bool autoStart: false
+  property bool autoStartChecked: false
+
+  // On by default (matches existing behavior) — opt out, not opt in.
+  property bool notificationsEnabled: true
+
   // "192.168.1.5" when on the default port, "192.168.1.5:9999" otherwise —
   // the one canonical string used for display, Known Hosts entries, and
   // round-tripping through the IP field.
@@ -89,9 +104,14 @@ Panel {
   property double runningSinceMs: 0
   property int uptimeTick: 0
 
-  // ---- Known hosts: last few saved IPs, for one-click switching (the
+  // ---- Known hosts: last few saved hosts, for one-click switching (the
   //      direct analog of the built-in Wi-Fi panel's Known Networks list).
+  //      Each entry is { host, name } — name is optional, set via the
+  //      rename (pencil) action on a KnownHostRow.
   property var recentIps: []
+  // Which single row (by host string), if any, is in rename mode.
+  property string editingHost: ""
+  property string renameDraft: ""
 
   // ---- Keyboard shortcut (mirrors the todoist plugin's recorder exactly).
   property string keybindCombo: ""
@@ -260,7 +280,18 @@ Panel {
   }
 
   function notify(title, body) {
+    if (!root.notificationsEnabled) return
     Quickshell.execDetached(["omarchy-notification-send", title, body, "--app-name", "Waynergy", "-u", "critical"])
+  }
+
+  function setAutoStart(value) {
+    root.autoStart = value === true
+    persistSettings()
+  }
+
+  function setNotificationsEnabled(value) {
+    root.notificationsEnabled = value === true
+    persistSettings()
   }
 
   // ---- Host settings. Stored locally, never touches shell.json. Accepts
@@ -305,12 +336,20 @@ Panel {
   }
 
   // Push-to-front, dedupe, cap-5 — same idiom the built-in Tailscale panel
-  // uses for its recent Mullvad regions.
+  // uses for its recent Mullvad regions. Preserves an existing entry's
+  // name when it's re-saved rather than wiping it; only ever starts a
+  // genuinely new host off unnamed.
   function rememberIp(value) {
-    var next = [value]
-    for (var i = 0; i < root.recentIps.length && next.length < 5; i++) {
-      var existing = root.recentIps[i]
-      if (existing !== value && next.indexOf(existing) === -1) next.push(existing)
+    var existingName = ""
+    for (var i = 0; i < root.recentIps.length; i++) {
+      if (root.recentIps[i].host === value) { existingName = root.recentIps[i].name; break }
+    }
+    var next = [{ host: value, name: existingName }]
+    for (var j = 0; j < root.recentIps.length && next.length < 5; j++) {
+      var existing = root.recentIps[j]
+      if (existing.host === value) continue
+      if (next.some(function(e) { return e.host === existing.host })) continue
+      next.push(existing)
     }
     root.recentIps = next
   }
@@ -330,8 +369,16 @@ Panel {
   }
 
   function forgetIp(value) {
-    root.recentIps = root.recentIps.filter(function(v) { return v !== value })
+    root.recentIps = root.recentIps.filter(function(e) { return e.host !== value })
     persistSettings()
+  }
+
+  function renameHost(value, name) {
+    root.recentIps = root.recentIps.map(function(e) {
+      return e.host === value ? { host: e.host, name: String(name || "").trim() } : e
+    })
+    persistSettings()
+    root.editingHost = ""
   }
 
   function setShowLabel(value) {
@@ -350,11 +397,21 @@ Panel {
     if (typeof parsed.port === "number" && isValidPort(parsed.port)) root.port = Math.round(parsed.port)
     if (typeof parsed.showLabel === "boolean") root.showLabel = parsed.showLabel
     if (typeof parsed.keybind === "string") root.keybindCombo = parsed.keybind
+    if (typeof parsed.autoStart === "boolean") root.autoStart = parsed.autoStart
+    if (typeof parsed.notificationsEnabled === "boolean") root.notificationsEnabled = parsed.notificationsEnabled
     if (Array.isArray(parsed.recentIps)) {
+      // Accepts both the old format (a bare host string) and the current
+      // one ({host, name}) so an existing list survives the upgrade
+      // instead of silently vanishing.
       var loaded = []
       for (var i = 0; i < parsed.recentIps.length && loaded.length < 5; i++) {
-        var candidate = String(parsed.recentIps[i] || "").trim()
-        if (parseHostPort(candidate).valid && loaded.indexOf(candidate) === -1) loaded.push(candidate)
+        var raw = parsed.recentIps[i]
+        var hostStr = typeof raw === "string" ? raw.trim()
+          : (raw && typeof raw.host === "string" ? raw.host.trim() : "")
+        var nameStr = (raw && typeof raw.name === "string") ? raw.name.trim() : ""
+        if (!parseHostPort(hostStr).valid) continue
+        if (loaded.some(function(e) { return e.host === hostStr })) continue
+        loaded.push({ host: hostStr, name: nameStr })
       }
       root.recentIps = loaded
     }
@@ -364,7 +421,15 @@ Panel {
   }
 
   function persistSettings() {
-    settingsFile.setText(JSON.stringify({ ip: root.ip, port: root.port, showLabel: root.showLabel, keybind: root.keybindCombo, recentIps: root.recentIps }, null, 2) + "\n")
+    settingsFile.setText(JSON.stringify({
+      ip: root.ip,
+      port: root.port,
+      showLabel: root.showLabel,
+      keybind: root.keybindCombo,
+      autoStart: root.autoStart,
+      notificationsEnabled: root.notificationsEnabled,
+      recentIps: root.recentIps
+    }, null, 2) + "\n")
   }
 
   // ---- Keyboard shortcut recording. Mirrors a stripped-down Hyprland key
@@ -466,7 +531,7 @@ Panel {
   function currentFocusOrder() {
     var order = ["power", "ip", "save"]
     for (var i = 0; i < root.recentIps.length; i++) order.push("knownIp" + i)
-    order.push("label", "keybindDefault", "keybindRecord")
+    order.push("label", "autoStart", "notificationsEnabled", "keybindDefault", "keybindRecord")
     if (root.keybindCombo !== "") order.push("keybindRemove")
     return order
   }
@@ -485,13 +550,26 @@ Panel {
     else if (root.focusSection === "ip") Qt.callLater(function() { ipField.forceActiveFocus(); ipField.selectAll() })
     else if (root.focusSection === "save") { if (saveButton.enabled) root.saveIp() }
     else if (root.focusSection === "label") root.setShowLabel(!root.showLabel)
+    else if (root.focusSection === "autoStart") root.setAutoStart(!root.autoStart)
+    else if (root.focusSection === "notificationsEnabled") root.setNotificationsEnabled(!root.notificationsEnabled)
     else if (root.focusSection === "keybindDefault") { if (keybindDefaultButton.enabled) root.applyKeybindCombo("CTRL + SUPER + Y") }
     else if (root.focusSection === "keybindRecord") { if (keybindRecordButton.enabled) root.startRecordingKeybind() }
     else if (root.focusSection === "keybindRemove") { if (keybindRemoveButton.visible && keybindRemoveButton.enabled) root.removeKeybindCombo() }
     else if (root.focusSection.indexOf("knownIp") === 0) {
       var idx = parseInt(root.focusSection.substring(7), 10)
-      if (idx >= 0 && idx < root.recentIps.length) root.switchToIp(root.recentIps[idx])
+      if (idx >= 0 && idx < root.recentIps.length) root.switchToIp(root.recentIps[idx].host)
     }
+  }
+
+  // "N" while a Known Hosts row has the cursor enters rename mode for
+  // that row — same letter-shortcut convention as the global S/R.
+  function renameCursorHost() {
+    if (root.focusSection.indexOf("knownIp") !== 0) return
+    var idx = parseInt(root.focusSection.substring(7), 10)
+    if (idx < 0 || idx >= root.recentIps.length) return
+    var entry = root.recentIps[idx]
+    root.editingHost = entry.host
+    root.renameDraft = entry.name
   }
 
   Component.onCompleted: {
@@ -557,6 +635,15 @@ Panel {
       }
       root.startPending = false
       root.running = isRunning
+      // Auto-start on login: exactly once per plugin lifetime, on the
+      // first status resolution after load, and only when this check
+      // positively confirms nothing's running yet — never on a later
+      // manual stop, and never on top of a session that survived a
+      // plugin/shell reload.
+      if (!root.autoStartChecked) {
+        root.autoStartChecked = true
+        if (!isRunning && root.autoStart) Qt.callLater(root.startWaynergy)
+      }
     }
   }
 
@@ -726,13 +813,14 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       clip: true
-      blocked: ipField.activeFocus || root.recordingKeybind
+      blocked: ipField.activeFocus || root.recordingKeybind || root.editingHost !== ""
       onCloseRequested: root.close()
       onMoveRequested: function(dx, dy) { if (dy !== 0) root.moveCursor(dy) }
       onActivateRequested: root.activateCursor()
       onTextKey: function(t) {
         if (t === "s" || t === "S") root.toggleWaynergy()
         else if (t === "r" || t === "R") root.refreshStatus()
+        else if (t === "n" || t === "N") root.renameCursorHost()
       }
 
       Flickable {
@@ -929,7 +1017,8 @@ Panel {
                   required property var modelData
                   required property int index
                   width: parent.width
-                  hostIp: modelData
+                  hostIp: modelData.host
+                  hostName: modelData.name
                   rowIndex: index
                 }
               }
@@ -940,27 +1029,86 @@ Panel {
             foreground: root.contentForeground
           }
 
-          RowLayout {
+          Column {
             width: parent.width
             spacing: Style.spacing.sm
 
-            ToggleSwitch {
-              id: labelSwitch
-              checked: root.showLabel
-              hasCursor: root.cursorActive && root.focusSection === "label"
+            PanelSectionHeader {
+              text: "PREFERENCES"
               foreground: root.contentForeground
-              Layout.alignment: Qt.AlignVCenter
-              onToggled: root.setShowLabel(!root.showLabel)
+              fontFamily: root.contentFontFamily
             }
 
-            Text {
-              text: "Show \"Waynergy\" label in the bar"
-              color: root.contentForeground
-              font.family: root.contentFontFamily
-              font.pixelSize: Style.font.body
-              wrapMode: Text.WordWrap
-              Layout.fillWidth: true
-              Layout.alignment: Qt.AlignVCenter
+            RowLayout {
+              width: parent.width
+              spacing: Style.spacing.sm
+
+              ToggleSwitch {
+                id: labelSwitch
+                checked: root.showLabel
+                hasCursor: root.cursorActive && root.focusSection === "label"
+                foreground: root.contentForeground
+                Layout.alignment: Qt.AlignVCenter
+                onToggled: root.setShowLabel(!root.showLabel)
+              }
+
+              Text {
+                text: "Show label in bar"
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.body
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+              }
+            }
+
+            RowLayout {
+              width: parent.width
+              spacing: Style.spacing.sm
+
+              ToggleSwitch {
+                id: autoStartSwitch
+                checked: root.autoStart
+                hasCursor: root.cursorActive && root.focusSection === "autoStart"
+                foreground: root.contentForeground
+                Layout.alignment: Qt.AlignVCenter
+                onToggled: root.setAutoStart(!root.autoStart)
+              }
+
+              Text {
+                text: "Start at login"
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.body
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+              }
+            }
+
+            RowLayout {
+              width: parent.width
+              spacing: Style.spacing.sm
+
+              ToggleSwitch {
+                id: notificationsSwitch
+                checked: root.notificationsEnabled
+                hasCursor: root.cursorActive && root.focusSection === "notificationsEnabled"
+                foreground: root.contentForeground
+                Layout.alignment: Qt.AlignVCenter
+                onToggled: root.setNotificationsEnabled(!root.notificationsEnabled)
+              }
+
+              Text {
+                text: "Notifications"
+                color: root.contentForeground
+                font.family: root.contentFontFamily
+                font.pixelSize: Style.font.body
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+                Layout.alignment: Qt.AlignVCenter
+              }
             }
           }
 
@@ -1096,13 +1244,32 @@ Panel {
   component KnownHostRow: CursorSurface {
     id: hostRow
     property string hostIp: ""
+    property string hostName: ""
     property int rowIndex: 0
     readonly property bool active: hostRow.hostIp === root.hostDisplay
+    readonly property bool editing: root.editingHost === hostRow.hostIp
+    readonly property string primaryText: hostRow.hostName !== "" ? hostRow.hostName : hostRow.hostIp
+    readonly property string secondaryText: {
+      var parts = []
+      if (hostRow.hostName !== "") parts.push(hostRow.hostIp)
+      if (hostRow.active) parts.push(root.running ? "Running" : "Active")
+      return parts.join(" · ")
+    }
 
     hasCursor: root.cursorActive && root.focusSection === ("knownIp" + hostRow.rowIndex)
     current: hostRow.active
     foreground: root.contentForeground
     implicitHeight: rowContent.implicitHeight + Style.spacing.rowPaddingX
+
+    onEditingChanged: {
+      if (editing) {
+        Qt.callLater(function() {
+          if (hostRow.editing) { renameField.forceActiveFocus(); renameField.selectAll() }
+        })
+      } else {
+        Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+      }
+    }
 
     // Declared before rowContent so it sits underneath in stacking order —
     // the PanelActionButton inside rowContent needs to receive its own
@@ -1111,6 +1278,7 @@ Panel {
     // the row's own action buttons the same way).
     MouseArea {
       anchors.fill: parent
+      enabled: !hostRow.editing
       hoverEnabled: true
       cursorShape: Qt.PointingHandCursor
       onEntered: { root.cursorActive = true; root.focusSection = "knownIp" + hostRow.rowIndex }
@@ -1127,6 +1295,7 @@ Panel {
       spacing: Style.space(8)
 
       Text {
+        visible: !hostRow.editing
         text: hostRow.active && root.running ? "●" : "○"
         color: hostRow.active ? root.contentForeground : root.dim
         font.family: root.contentFontFamily
@@ -1134,12 +1303,13 @@ Panel {
       }
 
       ColumnLayout {
+        visible: !hostRow.editing
         Layout.fillWidth: true
         spacing: 0
 
         Text {
           Layout.fillWidth: true
-          text: hostRow.hostIp
+          text: hostRow.primaryText
           color: root.contentForeground
           font.family: root.contentFontFamily
           font.pixelSize: Style.font.body
@@ -1147,20 +1317,50 @@ Panel {
         }
 
         Text {
-          visible: hostRow.active
-          text: root.running ? "Running" : "Active"
+          visible: hostRow.secondaryText !== ""
+          text: hostRow.secondaryText
           color: Qt.darker(root.contentForeground, 1.4)
           font.family: root.contentFontFamily
           font.pixelSize: Style.font.caption
         }
       }
 
+      TextField {
+        id: renameField
+        visible: hostRow.editing
+        Layout.fillWidth: true
+        activeFocusOnTab: false
+        placeholderText: "Name (optional)"
+        text: root.renameDraft
+        onTextChanged: root.renameDraft = text
+        onAccepted: root.renameHost(hostRow.hostIp, root.renameDraft)
+        Keys.onEscapePressed: root.editingHost = ""
+      }
+
       PanelActionButton {
-        iconText: "✕"
-        tooltipText: "Forget"
+        visible: !hostRow.editing
+        iconText: "✎"
+        tooltipText: "Rename"
         foreground: root.contentForeground
         Layout.alignment: Qt.AlignVCenter
-        onClicked: root.forgetIp(hostRow.hostIp)
+        onClicked: { root.editingHost = hostRow.hostIp; root.renameDraft = hostRow.hostName }
+      }
+
+      PanelActionButton {
+        visible: hostRow.editing
+        iconText: "󰄬"
+        tooltipText: "Save name"
+        foreground: root.contentForeground
+        Layout.alignment: Qt.AlignVCenter
+        onClicked: root.renameHost(hostRow.hostIp, root.renameDraft)
+      }
+
+      PanelActionButton {
+        iconText: "✕"
+        tooltipText: hostRow.editing ? "Cancel" : "Forget"
+        foreground: root.contentForeground
+        Layout.alignment: Qt.AlignVCenter
+        onClicked: hostRow.editing ? (root.editingHost = "") : root.forgetIp(hostRow.hostIp)
       }
     }
   }
